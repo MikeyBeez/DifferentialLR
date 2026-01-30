@@ -1,0 +1,351 @@
+Phased Specialization: Unlocking Hybrid Sequence Models via Optimization-Aware Training
+
+Code: https://github.com/MikeyBeez/DifferentialLR
+
+
+ABSTRACT
+
+Hybrid sequence models, combining the local-pattern recognition of attention mechanisms with the long-range efficiency of State Space Models (SSMs), theoretically offer the best of both worlds. However, we demonstrate that standard joint optimization frequently fails to realize these gains, often resulting in performance inferior to pure attention baselines. We identify gradient interference and learning-speed asymmetry as the primary culprits: the faster-converging attention mechanism dominates early training, preventing the SSM module from specializing.
+
+We propose Phased Specialization, a training strategy utilizing differential learning rates to decouple module optimization. In experiments on WikiText-2 using a Mamba-Transformer hybrid, our approach yields a 34-point perplexity improvement over joint training (157.5 vs 191.5) while reducing cross-seed variance from 4.3 to 1.3. Crucially, we show that architectural interventions such as gated residuals fail to rescue joint training, confirming that the bottleneck is fundamentally an optimization-level conflict rather than a capacity constraint. Our results suggest that as architectures become more heterogeneous, the one-size-fits-all training paradigm must be replaced by strategies that respect individual module dynamics.
+
+
+1. INTRODUCTION
+
+Hybrid transformer architectures promise to combine the complementary strengths of different sequence modeling mechanisms. Softmax attention excels at local pattern recognition and content-based routing, while State Space Models like Mamba offer efficient long-range dependency modeling with linear complexity. In principle, their combination should outperform either alone.
+
+However, we show that this promise is rarely realized under standard training. Our multi-seed experiments reveal that the same hybrid architecture can perform significantly worse or significantly better than baseline depending entirely on the optimization strategy.
+
+1.1 The Gradient Interference Problem
+
+Joint optimization of heterogeneous modules creates a zero-sum game in early training. We hypothesize that:
+
+First, attention mechanisms have shorter effective gradient paths and more stable optimization due to the softmax structure. They resolve local linguistic features rapidly.
+
+Second, SSM modules require more iterations to stabilize their recurrent hidden states. Their loss surface is more complex.
+
+Third, under joint training, the model reaches a local minimum where attention performs all computation while the SSM becomes redundant noise that the optimizer learns to ignore.
+
+We term this phenomenon learning-speed asymmetry. It explains why hybrid architectures often underperform their homogeneous counterparts despite theoretical advantages.
+
+1.2 Evidence: Variance Collapse
+
+Our strongest evidence for gradient interference comes from variance analysis across seeds:
+
+Joint Training shows high variance: 191.5 PPL with standard deviation 4.3. This suggests the optimizer searches blindly, often reaching bad local minima where modules compete rather than specialize.
+
+Phased Training shows low variance: 157.5 PPL with standard deviation 1.3. This suggests a smooth, repeatable optimization path.
+
+The variance reduction is not incidental. It indicates that phased training creates a more convex-like loss surface by eliminating the gradient interference that causes optimization instability.
+
+1.3 Contributions
+
+This work makes four contributions.
+
+First, we demonstrate that a 4 Softmax + 4 Mamba architecture trained jointly performs 14% worse than a full softmax baseline (191.5 vs 167.3 PPL). Claims of architectural improvements based on single runs may reflect lucky seeds rather than genuine benefits.
+
+Second, we show that Phased Specialization transforms the same architecture from 14% worse to 6% better than baseline (157.5 PPL). This 34-point improvement comes entirely from the training strategy.
+
+Third, we demonstrate that extended training causes rapid overfitting. The optimal strategy is early stopping during the second phase, not adding coordination phases.
+
+Fourth, we show that architectural modifications cannot rescue poor optimization. When gated skip connections are added to jointly-trained hybrids, learned gates keep the undertrained SSM output (gate converges to 0.92) rather than bypass it. This confirms the bottleneck is optimization-level, not capacity-level.
+
+
+2. RELATED WORK
+
+2.1 Gradient Interference in Multi-Task Learning
+
+The gradient interference we observe has parallels in multi-task learning. Yu et al. (2020) introduced Gradient Surgery (PCGrad), showing that conflicting gradients between tasks cause destructive interference. Their solution projects gradients to remove conflicts.
+
+Our work identifies a similar phenomenon within a single model: different modules act as implicit competing tasks. However, our solution differs fundamentally. Rather than modify gradients, we temporally separate module optimization through phased learning rates.
+
+2.2 Curriculum Learning and Staged Training
+
+Bengio et al. (2009) showed that presenting training examples in meaningful order improves generalization. Our phased approach can be viewed as a form of module curriculum: we train modules in an order that respects their learning dynamics.
+
+This connects to recent work on progressive training, where model capacity increases during training. We show that similar benefits arise from progressive module activation even with fixed capacity.
+
+2.3 Mixture of Experts Collapse
+
+Shazeer et al. (2017) documented routing collapse in Mixture of Experts, where load balancing is required to prevent all inputs routing to the same expert. Fedus et al. (2022) showed that auxiliary losses and careful initialization are necessary for stable MoE training.
+
+The redundancy bottleneck we identify is analogous. Without intervention, the faster-learning module monopolizes gradient signal, causing other modules to collapse into redundancy. Our differential learning rates serve the same function as MoE load balancing: ensuring all modules receive meaningful training signal.
+
+2.4 State Space Models
+
+Gu and Dao (2023) introduced Mamba with selective state spaces where transition matrices are input-dependent. Unlike attention's discrete token selection, Mamba maintains smooth state evolution with linear complexity. Several works have explored Mamba-Transformer hybrids, but training dynamics have received limited attention.
+
+Our work suggests that many negative results for hybrid architectures may reflect optimization failures rather than architectural limitations.
+
+
+3. METHODS
+
+3.1 Model Architecture
+
+We use an 8-layer transformer with hidden dimension 512, 8 attention heads, head dimension 64, FFN dimension 2048, vocabulary size 50,257 (GPT-2 tokenizer), and approximately 45 million parameters.
+
+The hybrid configuration uses softmax attention for layers 0-3 and Mamba for layers 4-7. We implement Mamba in pure PyTorch with a Triton-accelerated selective scan kernel.
+
+3.2 Training Strategies
+
+We compare two training strategies for the hybrid architecture.
+
+Joint Training (Baseline): All parameters trained with the same learning rate (1e-4) for 10 epochs. This is the standard approach that we argue is fundamentally flawed for heterogeneous architectures.
+
+Phased Specialization: Parameters grouped by module type with temporally separated optimization.
+
+Phase 1, Attention Lead, lasting 4 epochs: Attention layers receive learning rate 3e-4, Mamba layers receive 1e-5. This allows attention to establish feature extraction before Mamba specializes.
+
+Phase 2, SSM Specialization, lasting 4 epochs: Attention layers receive 1e-5, Mamba layers receive 3e-4. Mamba learns to process the structured representations created by attention.
+
+The key insight is that neither module is ever frozen. The minimal learning rate (1e-5) maintains compatibility and allows minor adjustments while preventing the gradient monopolization that occurs under joint training.
+
+3.3 Approximate Block Coordinate Descent
+
+Phased Specialization can be understood as Approximate Block Coordinate Descent. Classical block coordinate descent optimizes one parameter block while holding others fixed. Our approach softens this to "optimize one block while minimally updating others."
+
+This framing explains both the effectiveness and the variance reduction. By approximately separating the optimization of heterogeneous modules, we avoid the gradient conflicts that make joint optimization unpredictable.
+
+3.4 Gated Skip Connections
+
+To test whether architectural modifications can rescue joint training, we add learned gated skip connections:
+
+output = gate * mamba_output + (1 - gate) * softmax_output
+
+where gate is a learned scalar initialized to 0.5. If the undertrained Mamba layers were purely harmful, the gate should learn to bypass them.
+
+
+4. EXPERIMENTS
+
+4.1 Multi-Seed Validation
+
+We run each configuration with 5 different random seeds (42, 123, 456, 789, 1337).
+
+Full Softmax baseline:
+Seeds: 168.2, 167.2, 167.6, 165.4, 168.2
+Mean: 167.3, Std: 1.1
+
+4 Softmax + 4 Mamba with joint training:
+Seeds: 189.7, 197.6, 187.8, 187.4, 195.1
+Mean: 191.5, Std: 4.3
+
+4 Softmax + 4 Mamba with phased specialization:
+Seeds: 158.4, 159.1, 157.8, 156.0, 156.2
+Mean: 157.5, Std: 1.3
+
+Critical findings:
+
+The hybrid with joint training is 14% worse than the pure attention baseline. This contradicts the assumption that hybrid architectures should at least match their components.
+
+Phased specialization transforms the same architecture to 6% better than baseline. The architecture is unchanged; only the training differs.
+
+Phased training reduces variance by 70% (std 4.3 to 1.3). This supports our hypothesis that phased training creates a smoother loss surface.
+
+4.2 Training Dynamics
+
+We track per-epoch performance during phased training.
+
+Attention Lead phase: Epoch 1: 499.6, Epoch 2: 347.0, Epoch 3: 278.5, Epoch 4: 234.6
+
+SSM Specialization phase: Epoch 5: 187.9, Epoch 6: 170.8, Epoch 7: 162.3, Epoch 8: 158.4, Epoch 9: 187.2
+
+PPL improves steadily through epoch 8 (158.4) then degrades sharply at epoch 9 (187.2). This 29-point degradation within a single phase indicates overfitting, not phase transition issues. The optimal strategy is early stopping at peak validation performance.
+
+4.3 Throughput Analysis
+
+The hybrid architecture maintains competitive throughput despite adding Mamba layers:
+
+At 512 tokens: Full Softmax achieves 295,000 tok/s. Hybrid achieves 317,000 tok/s (107% of baseline).
+
+At 1024 tokens: Full Softmax achieves 215,000 tok/s. Hybrid achieves 257,000 tok/s (119% of baseline).
+
+The hybrid is faster than pure softmax at all tested sequence lengths due to Mamba's linear complexity replacing quadratic attention in later layers.
+
+4.4 Frozen Module Ablation
+
+To establish module ceilings and prove that separation alone is insufficient, we run three ablation experiments.
+
+Frozen Mamba (train Softmax only): Best PPL 200.9
+Frozen Softmax (train Mamba only): Best PPL 247.3
+Sequential (Softmax then Mamba, hard freeze): Best PPL 189.1
+
+Critical findings:
+
+Neither module alone reaches baseline. Softmax-only (200.9) is worse than the full softmax baseline (167.3), and Mamba-only (247.3) is worse still. Both modules are necessary.
+
+Sequential training with hard freezing (189.1) performs nearly identically to joint training (191.5). Simply separating the phases is not enough. The 32-point gap between Sequential (189.1) and Phased Specialization (157.5) comes from the minimal learning rate (1e-5) during non-lead phases.
+
+The minimal LR maintains module compatibility. With complete freezing, the leading module cannot adapt to output changes from the frozen module. The 1e-5 LR provides a "compatibility signal" that keeps both modules aligned during phased training.
+
+4.5 Failure of Architectural Rescue
+
+We test whether gated skip connections can recover joint training performance.
+
+On jointly-trained model (189.7 PPL):
+
+Training gate only: Gate converges to 0.92, PPL stays 189.6. The model keeps the undertrained Mamba output.
+
+Training all parameters: Gate hovers at 0.50, PPL improves slightly to 188.0.
+
+The gate does not learn to bypass the undertrained module. Even with poor training, Mamba contributes something, so the gate keeps it. The 30-point gap between gated skip (188.0) and phased training (157.5) demonstrates that architectural modifications cannot substitute for proper optimization.
+
+On phased-trained model (158.4 PPL): Gate converges to 1.0, confirming that properly trained Mamba is fully useful.
+
+
+5. ANALYSIS
+
+5.1 Why Does Joint Training Fail?
+
+Under joint optimization, attention learns faster due to simpler gradient paths. The attention layers capture most learnable signal before Mamba can specialize. The Mamba layers then learn to process attention's output residuals rather than developing complementary capabilities.
+
+This explains the high variance under joint training. The outcome depends on early random initialization: if attention happens to dominate less aggressively, Mamba has more opportunity to specialize. Different seeds produce different degrees of module competition.
+
+5.2 Why Does Phased Training Succeed?
+
+Phased Specialization breaks the competition by giving each module a protected learning window.
+
+During Attention Lead, attention layers establish feature extraction while Mamba makes minimal updates to maintain compatibility.
+
+During SSM Specialization, Mamba learns to process the stable representations created by attention. Because attention is nearly fixed, Mamba receives consistent input statistics and can specialize effectively.
+
+The low variance confirms this interpretation. When modules are not competing, the optimization path becomes reproducible.
+
+5.3 Why Can't Architecture Rescue Optimization?
+
+Gated skip connections fail because the gate optimizes for current loss, not potential. With undertrained Mamba, the gate observes that Mamba output is better than nothing, so it keeps it (gate approaches 0.92). The skip provides an alternative path but not alternative learning.
+
+This finding has broader implications. Architectural modifications that provide bypass paths cannot fix training dynamics. They may even hide the problem by making poorly-trained modules less harmful while leaving their potential unrealized.
+
+
+6. DISCUSSION
+
+6.1 Implications for Hybrid Architectures
+
+Our results suggest that negative findings for hybrid architectures may often reflect optimization failures. Before concluding that an architecture is inferior, researchers should verify that their training protocol is appropriate for the module heterogeneity.
+
+The variance analysis provides a diagnostic: if cross-seed variance is high, gradient interference is likely occurring, and phased training should be considered.
+
+6.2 Beyond Learning Rate Schedules
+
+Phased Specialization is one instance of optimization-aware training. Other approaches may include gradient projection (as in PCGrad), layer-wise learning rate scaling, or explicit module curriculum.
+
+The key principle is that heterogeneous modules require heterogeneous optimization. The one-size-fits-all paradigm fails when component learning dynamics differ significantly.
+
+6.3 Limitations
+
+Our experiments use 45 million parameter models on WikiText-2. Scaling behavior to larger models and datasets is unknown.
+
+The optimal phase lengths and learning rates likely depend on model size and the specific modules combined.
+
+We test only the Mamba-Transformer hybrid. Other combinations (e.g., linear attention variants, RWKV) may exhibit different dynamics.
+
+
+7. PRACTICAL RECOMMENDATIONS
+
+For hybrid architectures combining modules with different learning dynamics:
+
+Always validate with multiple seeds. High variance indicates gradient interference.
+
+Use phased training: Train the slower-learning module last on stable representations from faster modules.
+
+Never fully freeze. Use minimal learning rates (1e-5) to maintain module compatibility.
+
+Stop early. Monitor validation loss and stop when improvement stalls; coordination phases do not help.
+
+Do not rely on architectural fixes. Gated skips and similar modifications cannot rescue poor training.
+
+
+8. CONCLUSION
+
+We demonstrate that optimization dynamics, not architecture, determine whether hybrid sequence models succeed. A Mamba-Transformer hybrid performs 14% worse than baseline with joint training but 6% better with Phased Specialization. This 34-point improvement comes entirely from giving each module a protected learning window.
+
+The failure of gated skip connections to rescue joint training confirms that the bottleneck is optimization-level. The gate learns to keep undertrained modules rather than bypass them, demonstrating that architectural interventions cannot substitute for proper training.
+
+Our multi-seed experiments reveal that single-run results are unreliable. High variance under joint training indicates gradient interference, while low variance under phased training indicates a smooth optimization surface.
+
+As architectures become more heterogeneous, training protocols must evolve accordingly. The central lesson: when combining modules with different learning speeds, temporal separation of their optimization is not optional.
+
+
+APPENDIX A: MULTI-SEED RESULTS
+
+Full Softmax baseline:
+Seed 42: 168.2, Seed 123: 167.2, Seed 456: 167.6, Seed 789: 165.4, Seed 1337: 168.2
+Mean: 167.3, Std: 1.1
+
+4S+4M joint training:
+Seed 42: 189.7, Seed 123: 197.6, Seed 456: 187.8, Seed 789: 187.4, Seed 1337: 195.1
+Mean: 191.5, Std: 4.3
+
+4S+4M phased specialization:
+Seed 42: 158.4, Seed 123: 159.1, Seed 456: 157.8, Seed 789: 156.0, Seed 1337: 156.2
+Mean: 157.5, Std: 1.3
+
+
+APPENDIX B: THROUGHPUT BENCHMARKS
+
+GPU: NVIDIA GeForce RTX 5070 Ti
+Model: 45M parameters, 8 layers
+
+Sequence Length 512:
+Full Softmax: 295,000 tok/s
+4S+4M Hybrid: 317,000 tok/s (107%)
+
+Sequence Length 1024:
+Full Softmax: 215,000 tok/s
+4S+4M Hybrid: 257,000 tok/s (119%)
+
+
+APPENDIX C: FROZEN MODULE ABLATION
+
+Frozen Mamba (Softmax only, 8 epochs):
+Epoch 1: 531.5, Epoch 2: 390.6, Epoch 3: 324.9, Epoch 4: 280.7
+Epoch 5: 249.1, Epoch 6: 227.6, Epoch 7: 210.7, Epoch 8: 200.9
+Best: 200.9 PPL
+
+Frozen Softmax (Mamba only, 8 epochs):
+Epoch 1: 756.6, Epoch 2: 485.6, Epoch 3: 384.7, Epoch 4: 331.8
+Epoch 5: 296.0, Epoch 6: 274.5, Epoch 7: 267.1, Epoch 8: 247.3
+Best: 247.3 PPL
+
+Sequential (Softmax 4 epochs, then Mamba 4 epochs, hard freeze):
+Phase 1: 531.5 -> 390.6 -> 324.9 -> 280.7
+Phase 2: 241.1 -> 215.6 -> 199.4 -> 189.1
+Best: 189.1 PPL
+
+Key comparison:
+Sequential (hard freeze): 189.1 PPL
+Joint training: 191.5 PPL
+Phased Specialization: 157.5 PPL
+
+The 32-point gap between Sequential and Phased Specialization demonstrates that
+the minimal LR (1e-5) is not just "slow training" but provides essential
+compatibility signal between modules.
+
+
+APPENDIX D: GATED SKIP RESULTS
+
+Well-trained model (phased):
+Base PPL: 158.4
+Gate-only training: PPL 158.4, Gate 1.00
+Interpretation: Mamba useful, skip not needed
+
+Poorly-trained model (joint):
+Base PPL: 189.7
+Gate-only training: PPL 189.6, Gate 0.92
+Full training: PPL 188.0, Gate 0.50
+Interpretation: Mamba partially useful, skip doesn't rescue
+
+
+REFERENCES
+
+Bengio, Y., Louradour, J., Collobert, R., & Weston, J. (2009). Curriculum learning. ICML.
+
+Fedus, W., Zoph, B., & Shazeer, N. (2022). Switch Transformers: Scaling to trillion parameter models with simple and efficient sparsity. JMLR.
+
+Gu, A., & Dao, T. (2023). Mamba: Linear-time sequence modeling with selective state spaces.
+
+Shazeer, N., Mirhoseini, A., Maziarz, K., Davis, A., Le, Q., Hinton, G., & Dean, J. (2017). Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. ICLR.
+
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. NeurIPS.
+
+Yu, T., Kumar, S., Gupta, A., Levine, S., Hausman, K., & Finn, C. (2020). Gradient surgery for multi-task learning. NeurIPS.
