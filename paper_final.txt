@@ -1,0 +1,243 @@
+Differential Learning Rate Training Makes Hybrid Transformers Work
+
+Code: https://github.com/MikeyBeez/DifferentialLR
+
+
+ABSTRACT
+
+We investigate training dynamics for hybrid transformer architectures that combine softmax attention with state space models. Through multi-seed experiments on WikiText-2, we discover that the architecture alone does not explain performance differences. A 4 Softmax + 4 Mamba hybrid trained with uniform learning rates performs significantly worse than a full softmax baseline (191.5 vs 167.3 PPL). However, the same architecture trained with differential learning rates, where each module type leads in turn, achieves 6% better perplexity than the baseline (157.5 vs 167.3). This 34-point improvement comes entirely from the training strategy, not the architecture. We further show that extended training causes rapid overfitting, and the optimal strategy is early stopping during the second training phase. Gated skip connections do not rescue poorly-trained models, confirming that proper training cannot be substituted with architectural modifications. These findings suggest that training dynamics, not architecture, determine whether hybrid models succeed or fail.
+
+
+1. INTRODUCTION
+
+Hybrid transformer architectures that combine different sequence modeling mechanisms have shown promise in recent work. Configurations mixing softmax attention with state space models like Mamba, or replacing late attention layers with MLPs, have reported improvements over homogeneous transformers.
+
+However, our multi-seed experiments reveal a surprising finding: the architecture alone does not explain these improvements. The same hybrid architecture can perform significantly worse or significantly better than the baseline depending entirely on the training strategy.
+
+This work makes four contributions.
+
+First, we show that a 4 Softmax + 4 Mamba architecture trained with uniform learning rates performs 14% worse than a full softmax baseline across five random seeds (191.5 vs 167.3 PPL). Claims of architectural improvements based on single runs may reflect lucky seeds rather than genuine benefits.
+
+Second, we demonstrate that differential learning rate training, where softmax and Mamba modules take turns leading with higher learning rates, transforms the same architecture from 14% worse to 6% better than baseline (157.5 PPL). This 34-point improvement comes entirely from training dynamics.
+
+Third, we show that extended training causes rapid overfitting. The optimal strategy is early stopping during the Mamba training phase, not adding coordination phases where both modules train jointly.
+
+Fourth, we demonstrate that gated skip connections cannot rescue poorly-trained models. When added to a uniformly-trained hybrid, learned gates choose to keep the mamba output (gate approaches 0.92), not bypass it, and PPL remains poor. Proper training cannot be substituted with architectural band-aids.
+
+
+2. BACKGROUND
+
+2.1 The Redundancy Bottleneck
+
+When multiple modules can reduce the same training loss, gradient descent allocates explanatory responsibility to the module with the shortest effective path from input to loss. The faster-learning module monopolizes gradient signal, crowding out slower modules before they can specialize.
+
+This phenomenon appears across many settings: MoE routing collapse, multitask interference, lottery ticket competition, and hybrid architecture failures. The common mechanism is learning-speed asymmetry between competing modules.
+
+2.2 State Space Models
+
+Mamba introduces selective state spaces where transition matrices are input-dependent, allowing content-based retention and forgetting. Unlike attention's discrete token selection, Mamba maintains smooth state evolution with linear complexity in sequence length.
+
+
+3. METHODS
+
+3.1 Model Architecture
+
+We use an 8-layer transformer with hidden dimension 512, 8 attention heads, head dimension 64, FFN dimension 2048, vocabulary size 50,257 (GPT-2 tokenizer), and approximately 45 million parameters.
+
+The hybrid configuration uses softmax attention for layers 0-3 and Mamba for layers 4-7. We implement Mamba in pure PyTorch with a Triton-accelerated selective scan kernel.
+
+3.2 Training Strategies
+
+We compare two training strategies for the hybrid architecture.
+
+Uniform Learning Rate: All parameters trained with the same learning rate (1e-4) for 10 epochs. This is the standard approach.
+
+Differential Learning Rate: Parameters grouped by module type with phased training.
+
+Phase 1, Softmax Lead, lasting 4 epochs: Softmax layers receive learning rate 3e-4, Mamba layers receive 1e-5 (minimal but not frozen).
+
+Phase 2, Mamba Catchup, lasting 4 epochs: Softmax layers receive 1e-5, Mamba layers receive 3e-4.
+
+The key insight is that we do not add a coordination phase where both modules train at equal rates. Our experiments show this causes degradation.
+
+3.3 Gated Skip Connections
+
+To test whether architectural modifications can rescue poor training, we add learned gated skip connections:
+
+output = gate * mamba_output + (1 - gate) * softmax_output
+
+where gate is a learned scalar initialized to 0.5. We test this on both well-trained (differential LR) and poorly-trained (uniform LR) models.
+
+
+4. EXPERIMENTS
+
+4.1 Multi-Seed Validation
+
+We run each configuration with 5 different random seeds (42, 123, 456, 789, 1337).
+
+Full Softmax baseline:
+Seeds: 168.2, 167.2, 167.6, 165.4, 168.2
+Mean: 167.3, Std: 1.1
+
+4 Softmax + 4 Mamba with uniform LR:
+Seeds: 189.7, 197.6, 187.8, 187.4, 195.1
+Mean: 191.5, Std: 4.3
+
+4 Softmax + 4 Mamba with differential LR:
+Seeds: 158.4, 159.1, 157.8, 156.0, 156.2
+Mean: 157.5, Std: 1.3
+
+Critical findings:
+
+The hybrid architecture with uniform training is 14% worse than baseline (191.5 vs 167.3).
+
+Differential LR training transforms the same architecture to 6% better than baseline (157.5 vs 167.3).
+
+Differential LR reduces variance (std 1.3 vs 4.3), suggesting more stable optimization.
+
+4.2 Extended Training and Overfitting
+
+We track per-epoch performance during differential LR training.
+
+Softmax Lead phase: Epoch 1: 499.6, Epoch 2: 347.0, Epoch 3: 278.5, Epoch 4: 234.6
+
+Mamba Catchup phase: Epoch 5: 187.9, Epoch 6: 170.8, Epoch 7: 162.3, Epoch 8: 158.4, Epoch 9: 187.2
+
+PPL improves through epoch 8 (158.4) then degrades sharply at epoch 9 (187.2). This 29-point degradation occurs within the same phase. Extended training causes overfitting. The optimal strategy is early stopping at epoch 8.
+
+4.3 Coordination Phase Ablation
+
+Starting from epoch 9 (187.2 PPL), we test coordination with various learning rates.
+
+No coordination: Best 158.4 at epoch 8
+Coordination LR 1e-4: Best 174.5
+Coordination LR 5e-5: Best 175.8
+Coordination LR 1e-5: Best 176.2
+Coordination LR 5e-6: Best 176.9
+Coordination LR 1e-6: Best 179.5
+
+Coordination can partially recover from overfitting (187.2 to 174.5) but never beats early stopping (158.4). The optimal strategy is stopping at the right time, not adding recovery phases.
+
+4.4 Gated Skip Connection Experiments
+
+On well-trained model (differential LR, 158.4 PPL):
+
+Initial gate: 0.95 (initialized high)
+After training gate only: Gate converges to 1.0, PPL stays 158.4
+After training all params: Gate converges to 1.0, PPL stays 158.4
+
+The gate learns to fully keep mamba output. Skip connection not needed when training is proper.
+
+On poorly-trained model (uniform LR, 189.7 PPL):
+
+Initial gate: 0.50 (neutral)
+After training gate only: Gate converges to 0.92, PPL stays 189.6
+After training all params: Gate hovers at 0.50, PPL improves slightly to 188.0
+
+The gate does NOT learn to bypass mamba. Even with poor training, mamba contributes something. Gated skip provides minimal improvement (189.7 to 188.0) compared to proper training (157.5).
+
+Key finding: Gated skip connections cannot substitute for proper training. The model learns to keep undertrained mamba rather than bypass it, and PPL remains 30 points worse than differential LR training.
+
+
+5. ANALYSIS
+
+5.1 Why Does Uniform Training Fail?
+
+With uniform learning rates, softmax attention learns faster than Mamba due to simpler gradient paths. The softmax layers quickly capture most of the learnable signal, leaving Mamba layers undertrained.
+
+This is the redundancy bottleneck in action. Both module types can reduce the same loss, so the faster learner dominates. The Mamba layers become partially useful but suboptimal, making the hybrid worse than a pure softmax model.
+
+5.2 Why Does Differential Training Succeed?
+
+Differential LR training breaks the competition by giving each module a protected learning window.
+
+During Softmax Lead, attention layers learn to route information and extract features while Mamba layers make minimal updates.
+
+During Mamba Catchup, Mamba layers learn to process the structured representations created by softmax, while attention layers hold steady.
+
+This phased approach allows both modules to specialize rather than compete.
+
+5.3 Why Don't Gated Skips Help?
+
+Gated skip connections fail to rescue poorly-trained models because:
+
+The gate optimizes for current loss, not for what could have been learned. With undertrained mamba, the gate sees that mamba output is still better than nothing, so it keeps it (gate approaches 0.92).
+
+The skip connection provides an alternative path but not alternative learning. Mamba's weights remain undertrained regardless of the gate value.
+
+Architectural modifications cannot substitute for training dynamics. The 30-point gap between gated skip (188.0) and differential LR (157.5) demonstrates this clearly.
+
+
+6. PRACTICAL RECOMMENDATIONS
+
+For hybrid Softmax + Mamba architectures, always use differential learning rate training. Uniform training makes the hybrid worse than baseline.
+
+The optimal training schedule:
+Phase 1: 4 epochs with softmax LR 3e-4, mamba LR 1e-5
+Phase 2: 4 epochs with softmax LR 1e-5, mamba LR 3e-4
+Stop at best validation PPL (typically epoch 7-8)
+
+Do not add coordination phases. They cannot beat early stopping.
+
+Do not rely on architectural modifications like gated skips to fix training problems. They provide minimal benefit.
+
+Always validate with multiple seeds. We observed a 34-point PPL difference between training strategies for identical architectures.
+
+
+7. LIMITATIONS
+
+Experiments use approximately 45 million parameter models on WikiText-2. Scaling behavior to larger models and datasets is unknown.
+
+The optimal phase lengths and learning rates likely depend on model size.
+
+Gated skip experiments used a single scalar gate. Per-token or per-layer gating might show different results.
+
+
+8. CONCLUSION
+
+We demonstrate that training dynamics, not architecture, determine whether hybrid transformers succeed. A 4 Softmax + 4 Mamba architecture performs 14% worse than baseline with uniform training but 6% better with differential learning rate training. This 34-point improvement comes entirely from giving each module type a protected learning window.
+
+Gated skip connections cannot rescue poorly-trained models. When added to uniformly-trained hybrids, learned gates choose to keep undertrained mamba output rather than bypass it, confirming that the gate optimizes for current state, not potential.
+
+Our multi-seed experiments reveal that single-run results are unreliable. Previous claims of architectural improvements may reflect lucky seeds rather than genuine benefits.
+
+The central lesson: when combining modules with different learning speeds, how you train matters more than what you train. Differential learning rates are not optional for hybrid architectures.
+
+
+APPENDIX A: MULTI-SEED RESULTS
+
+Full Softmax baseline:
+Seed 42: 168.2, Seed 123: 167.2, Seed 456: 167.6, Seed 789: 165.4, Seed 1337: 168.2
+Mean: 167.3, Std: 1.1
+
+4S+4M uniform LR:
+Seed 42: 189.7, Seed 123: 197.6, Seed 456: 187.8, Seed 789: 187.4, Seed 1337: 195.1
+Mean: 191.5, Std: 4.3
+
+4S+4M differential LR:
+Seed 42: 158.4, Seed 123: 159.1, Seed 456: 157.8, Seed 789: 156.0, Seed 1337: 156.2
+Mean: 157.5, Std: 1.3
+
+
+APPENDIX B: GATED SKIP RESULTS
+
+Well-trained model (differential LR):
+Base PPL: 158.4
+Gate-only training: PPL 158.4, Gate 1.00
+Full training: PPL 158.4, Gate 1.00
+Interpretation: Mamba useful, skip not needed
+
+Poorly-trained model (uniform LR):
+Base PPL: 189.7
+Gate-only training: PPL 189.6, Gate 0.92
+Full training: PPL 188.0, Gate 0.50
+Interpretation: Mamba partially useful, skip doesn't rescue
+
+
+REFERENCES
+
+Gu and Dao. Mamba: Linear-Time Sequence Modeling with Selective State Spaces. 2023.
+
+Vaswani et al. Attention Is All You Need. NeurIPS 2017.
+
+Shazeer et al. Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer. ICLR 2017.
