@@ -1,0 +1,58 @@
+# Default configuration for chunked linear attention experiments
+
+name: "default"
+seed: 42
+
+# Model configuration (TinyLlama-style ~125M params)
+model:
+  hidden_dim: 768
+  num_layers: 12
+  num_heads: 12
+  head_dim: 64
+  intermediate_dim: 3072
+  vocab_size: 32000
+  max_seq_length: 2048
+  dropout: 0.1
+  chunk_size: 64
+  gamma: 0.95
+
+# Training configuration
+training:
+  batch_size: 8
+  seq_length: 1024
+  num_epochs: 3
+  max_steps: 10000
+
+  # Learning rates
+  within_chunk_lr: 0.0003
+  cross_chunk_lr: 0.0003
+  weight_decay: 0.1
+
+  # Scheduling
+  warmup_steps: 1000
+  lr_scheduler: "cosine"
+
+  # Optimization
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  use_amp: true
+
+  # Logging
+  log_interval: 10
+  eval_interval: 500
+  save_interval: 1000
+  output_dir: "outputs"
+
+  # Diagnostics
+  track_gradients: true
+  track_magnitudes: true
+  diagnostic_interval: 100
+
+  # Data
+  dataset: "wikitext-2"
+  num_workers: 4
+
+# Sweep parameters (for experiment scripts)
+chunk_sizes: [16, 32, 64, 128, 256, 512]
+gammas: [0.9, 0.95, 0.99, 0.999]
+lr_ratios: [0.1, 0.5, 1.0, 2.0, 10.0]
