@@ -1,4 +1,90 @@
-# Phased Specialization for Hybrid Sequence Models
+# Linear Attention Research
+
+This repository contains two research directions on efficient sequence modeling:
+
+1. **Golden Ratio Crystallization** - Replacing attention with fixed geometric decay (NEW)
+2. **Phased Specialization** - Training strategy for hybrid Mamba-Transformer models
+
+---
+
+## Golden Ratio Crystallization
+
+**Paper: [paper_end_of_attention.txt](paper_end_of_attention.txt)**
+
+We replace the O(N²) attention mechanism with a O(N) "crystal" that accumulates context using powers of φ⁻¹ = 0.618 (the Golden Ratio).
+
+### Key Results
+
+| Dataset | Crystal PPL | Attention PPL | Gap |
+|---------|-------------|---------------|-----|
+| WikiText-2 | 1.4 | 1.2 | +0.2 |
+| WikiText-103 | 1.0 | 1.0 | **0.0** |
+
+**At scale, the gap vanishes.** The Crystal matches attention quality on larger datasets.
+
+### Why It Works
+
+```
+h_t = φ⁻¹ * h_{t-1} + x_t
+```
+
+- **O(1) state**: Two D-dimensional vectors regardless of sequence length
+- **O(N) memory**: No quadratic attention matrix
+- **No positional encoding**: Position is encoded by the decay geometry itself
+- **Bounded magnitude**: The series 1 + φ⁻¹ + φ⁻² + ... = φ exactly
+
+### Memory Comparison
+
+| Sequence Length | Crystal | Attention | Savings |
+|-----------------|---------|-----------|---------|
+| 256 | 224 MB | 227 MB | 1.0x |
+| 16,384 | 1,809 MB | 8,432 MB | 4.7x |
+| 32,768 | 3,421 MB | OOM | ∞ |
+
+### KV Cache Elimination (Inference)
+
+For 100 users with 100,000-token contexts:
+
+| | Transformer | Crystal |
+|--|-------------|---------|
+| Per-user state | 1,562 MB | 2 KB |
+| Total VRAM | 153 GB | 0.2 MB |
+| **Savings** | | **800,000x** |
+
+### Limitation: Content-Dependent Retrieval
+
+The Crystal cannot "find the needle":
+
+| Task | Attention | Crystal |
+|------|-----------|---------|
+| "Copy token from 3 positions ago" | 100% | 20% |
+
+The Crystal captures *influence*, not *identity*. For language modeling (pattern recognition), this is acceptable. For retrieval tasks, attention wins.
+
+### Run the Experiments
+
+```bash
+# Multi-dataset validation (WikiText-2, WikiText-103)
+python experiments/multi_dataset_test.py
+
+# Memory scaling torture test (256 to 65k tokens)
+python experiments/infinite_context_torture.py
+
+# KV Cache elimination benchmark
+python experiments/kv_cache_death.py
+
+# Content-dependent retrieval test (Crystal's weakness)
+python experiments/recall_test.py
+
+# Ablations
+python experiments/spiral_no_pos.py           # Positional encoding ablation
+python experiments/damped_multihead_test.py   # Multi-resolution decay
+python experiments/phi_powers_test.py         # Different decay rates
+```
+
+---
+
+## Phased Specialization for Hybrid Sequence Models
 
 **In our experiments, training strategy dominated architectural effects for hybrid transformers.**
 
@@ -125,6 +211,20 @@ DifferentialLR/
 │   ├── chunked_attention.py   # Softmax attention implementation
 │   └── mamba.py               # Mamba SSM with Triton kernel
 ├── experiments/
+│   │
+│   │ # Golden Ratio Crystallization
+│   ├── multi_dataset_test.py       # WikiText-2/103 validation
+│   ├── infinite_context_torture.py # Memory scaling up to 65k tokens
+│   ├── kv_cache_death.py           # Inference state comparison
+│   ├── recall_test.py              # Content-dependent retrieval test
+│   ├── spiral_no_pos.py            # Positional encoding ablation
+│   ├── damped_multihead_test.py    # Multi-resolution decay heads
+│   ├── phi_powers_test.py          # Decay rate experiments
+│   ├── damped_spiral_test.py       # Basic spiral tests
+│   ├── recursive_golden_spiral.py  # Recursive formulation
+│   ├── spiral_deep_mlp.py          # Deeper MLP experiments
+│   │
+│   │ # Phased Specialization (Mamba-Transformer)
 │   ├── multi_seed_validation.py    # 5-seed validation (key result)
 │   ├── frozen_ablation.py          # Module ceiling experiments
 │   ├── differential_mamba.py       # Phased training implementation
@@ -132,7 +232,9 @@ DifferentialLR/
 │   ├── gated_skip_uniform.py       # Gated skip on poorly-trained model
 │   ├── coordination_lr_ablation.py # Coordination phase analysis
 │   └── benchmark_tps.py            # Throughput measurement
-├── paper_neurips.txt          # Full paper (NeurIPS style)
+│
+├── paper_end_of_attention.txt # Golden Crystallization paper
+├── paper_neurips.txt          # Phased Specialization paper
 └── paper_final.txt            # Earlier version
 ```
 
