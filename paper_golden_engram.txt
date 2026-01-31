@@ -61,15 +61,35 @@ output_i = alpha_1 * V_1 + alpha_2 * V_2 + ... + alpha_N * V_N
 
 This is a point in the same vector space as the values V_j. The attention weights alpha_j determine where in this space the output lands. Geometrically, the output is a weighted centroid of the value vectors.
 
-3.2 The Role of Similarity
+3.2 Where Similarity Enters The Computation
 
-The similarity scores Q_i * K_j produce scalars that, after softmax normalization, become the mixing coefficients alpha_j. But the similarity computation is not the source of semantic meaning. The meaning emerges from the linear combination of semantically meaningful value vectors. Similarity merely selects which values to emphasize.
+Let us trace exactly where similarity appears in attention:
 
-3.3 When Fixed Weights Might Suffice
+scores = Q @ K^T
+weights = softmax(scores)
+output = weights @ V
+
+The dot product Q_i * K_j equals |Q_i| |K_j| cos(theta), where theta is the angle between the vectors. When Q and K point in similar directions, cos(theta) is large, so the dot product is large. This is why researchers call it similarity.
+
+But here is the problem: the model does not know it is computing similarity. It learns Q and K projections that produce useful scalars. Those scalars happen to be dot products, which happen to measure angular similarity. But the model is not trying to find similar tokens. It is learning whatever scalar values make the loss decrease.
+
+3.3 What The Scalars Actually Do
+
+The scalars become mixing weights after softmax normalization. A high score means include more of this value vector in the output. A low score means include less. The output is simply a weighted sum.
+
+The critical question: must these weights come from similarity? Or could any method of producing position-specific scalars work equally well?
+
+3.4 The Similarity Interpretation May Be Post-Hoc
+
+The similarity scores Q_i * K_j produce scalars that, after softmax normalization, become the mixing coefficients alpha_j. But the similarity computation is not the source of semantic meaning. The meaning emerges from the linear combination of semantically meaningful value vectors. Similarity is one way to produce scalars; it may not be the reason attention works.
+
+Our experiments support this view: fixed scalars based on position work almost as well as learned similarity-based scalars. No dot product. No similarity computation. Just deterministic weights. This suggests the dot product's role is not finding similar tokens but merely producing scalars. The search for similar tokens story may be a post-hoc narrative imposed by researchers, not the functional mechanism.
+
+3.5 When Fixed Weights Might Suffice
 
 If the optimal attention pattern for a task is largely predictable from position alone, such as attending primarily to nearby tokens or to fixed relative positions, then learned similarity-based routing is unnecessary overhead. A fixed weighting scheme that captures the dominant positional pattern could achieve similar results with less computation.
 
-3.4 Experimental Test
+3.6 Experimental Test
 
 We compared attention mechanisms that produce position-specific weights through different means:
 
