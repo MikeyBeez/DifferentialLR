@@ -195,9 +195,9 @@ Unlike Mamba's selective gating, the gating here is fixed. This sacrifices conte
 
 7.1 Implications
 
-Our results suggest that attention's quadratic complexity may be excessive for tasks with predictable positional routing patterns. The billions of parameters dedicated to learning attention weights may primarily learn positional patterns that could be captured by simple fixed coefficients.
+Decades of attention research have implicitly framed the mechanism as a semantic search procedure. Our results suggest this framing may be misguided: the similarity computation and softmax are functionally incidental. The network does not perform search; it produces deterministic linear combinations of token embeddings. From this perspective, standard attention is a Rube Goldberg machine, a complex process solving a problem that may not exist for many tasks.
 
-This does not diminish attention's value for tasks requiring dynamic, content-dependent routing. But it suggests that hybrid architectures could use efficient fixed-weight layers for most processing, reserving expensive learned attention for layers or tasks that truly require it.
+The billions of parameters dedicated to learning attention weights may primarily learn positional patterns that could be captured by simple fixed coefficients. This does not diminish attention's value for tasks requiring dynamic, content-dependent routing. But it suggests that hybrid architectures could use efficient fixed-weight layers for most processing, reserving expensive learned attention for layers or tasks that truly require it.
 
 7.2 Limitations and Honest Assessment
 
