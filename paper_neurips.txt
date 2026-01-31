@@ -75,6 +75,12 @@ The redundancy bottleneck we identify is analogous. Without intervention, the fa
 
 Gu and Dao (2023) introduced Mamba with selective state spaces where transition matrices are input-dependent. Unlike attention's discrete token selection, Mamba maintains smooth state evolution with linear complexity. Several works have explored Mamba-Transformer hybrids, but training dynamics have received limited attention.
 
+2.5 Differential Training in Large-Scale Models
+
+DeepMind (2024) introduced PEER (Parameter Efficient Expert Retrieval), demonstrating that differential learning rates are essential when combining heterogeneous modules at scale. Their phased training approach, where router and expert modules take turns leading, directly inspired our Phased Specialization strategy.
+
+DeepSeek (2025) proposed Manifold-Constrained Hyper-Connections (mHC), which addresses training stability by constraining residual mixing to preserve signal magnitude. While mHC modifies architecture to stabilize training, our approach achieves similar stability through the training schedule alone. Both works highlight that heterogeneous architectures require careful attention to optimization dynamics.
+
 Our work suggests that many negative results for hybrid architectures may reflect optimization failures rather than architectural limitations.
 
 
@@ -347,6 +353,10 @@ Interpretation: Mamba partially useful, skip doesn't rescue
 REFERENCES
 
 Bengio, Y., Louradour, J., Collobert, R., & Weston, J. (2009). Curriculum learning. ICML.
+
+DeepMind. (2024). PEER: Parameter Efficient Expert Retrieval. arXiv:2407.04153.
+
+DeepSeek-AI. (2025). Manifold-Constrained Hyper-Connections for Stable Deep Learning. arXiv:2512.24880.
 
 Fedus, W., Zoph, B., & Shazeer, N. (2022). Switch Transformers: Scaling to trillion parameter models with simple and efficient sparsity. JMLR.
 
