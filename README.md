@@ -1,110 +1,154 @@
-# Chunked Linear Attention Research Framework
+# Phased Specialization for Hybrid Sequence Models
 
-A research framework for investigating training dynamics of chunked linear attention, focusing on the interaction between within-chunk softmax attention and cross-chunk linear state mechanisms.
+**Training dynamics, not architecture, determine whether hybrid transformers succeed.**
 
-## Overview
+This repository contains code and experiments demonstrating that a Mamba-Transformer hybrid performs 14% worse than baseline with joint training, but 6% better with Phased Specialization. The 34-point perplexity improvement comes entirely from the training strategy.
 
-This framework implements a hybrid attention mechanism:
-- **Within each chunk**: Standard softmax attention O(C²) for fine-grained local modeling
-- **Across chunks**: Linear state with gamma decay O(L/C) for long-range dependencies
+## Key Findings
 
-The key research question: How do within-chunk and cross-chunk components interact during training, and can differential learning rates improve convergence?
+| Configuration | PPL | vs Baseline |
+|--------------|-----|-------------|
+| Full Softmax (baseline) | 167.3 | - |
+| 4S+4M Joint Training | 191.5 | -14% (worse) |
+| 4S+4M Phased Specialization | 157.5 | +6% (better) |
 
-## Architecture
+**The same architecture swings 34 PPL points based solely on training strategy.**
 
-TinyLlama-style model (~125M parameters):
-- hidden_dim: 768
-- num_layers: 12
-- num_heads: 12
-- head_dim: 64
-- intermediate_dim: 3072
+### Why Joint Training Fails
+
+Under uniform learning rates, softmax attention learns faster due to simpler gradient paths. It monopolizes the gradient signal, leaving Mamba undertrained. This is the **Redundancy Bottleneck**.
+
+### Why Phased Specialization Works
+
+By giving each module a protected learning window with differential LRs:
+- **Phase 1 (Softmax Lead):** Softmax LR 3e-4, Mamba LR 1e-5
+- **Phase 2 (Mamba Catchup):** Softmax LR 1e-5, Mamba LR 3e-4
+
+Neither module is ever frozen. The minimal LR (1e-5) maintains module compatibility.
+
+## Ablation Results
+
+| Experiment | PPL | What It Proves |
+|------------|-----|----------------|
+| Frozen Mamba (Softmax only) | 200.9 | Softmax alone can't reach baseline |
+| Frozen Softmax (Mamba only) | 247.3 | Mamba alone is even worse |
+| Sequential (hard freeze) | 189.1 | Separation alone ≈ joint training |
+| **Phased Specialization** | **157.5** | Minimal LR provides compatibility signal |
+
+The 32-point gap between Sequential (189.1) and Phased (157.5) proves the 1e-5 LR is essential.
+
+## Throughput
+
+The hybrid is actually **faster** than pure softmax due to Mamba's linear complexity:
+
+| Sequence Length | Full Softmax | 4S+4M Hybrid | Ratio |
+|-----------------|--------------|--------------|-------|
+| 512 | 295k tok/s | 317k tok/s | 107% |
+| 1024 | 215k tok/s | 257k tok/s | 119% |
 
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+pip install torch transformers datasets triton
 ```
 
 ## Quick Start
 
-### Train a single model
-
+### Run Multi-Seed Validation
 ```bash
-python -m src.train --chunk-size 64 --gamma 0.95 --max-steps 10000
+python experiments/multi_seed_validation.py
 ```
 
-### Run chunk size sweep
-
+### Run Frozen Module Ablation
 ```bash
-python experiments/baseline_sweep.py --mode chunk --max-steps 10000
+python experiments/frozen_ablation.py
 ```
 
-### Run gamma sweep
-
+### Run Gated Skip Experiments
 ```bash
-python experiments/baseline_sweep.py --mode gamma --max-steps 10000
+python experiments/gated_skip_test.py      # On well-trained model
+python experiments/gated_skip_uniform.py   # On poorly-trained model
 ```
 
-### Run differential LR experiment
-
+### Run Throughput Benchmark
 ```bash
-python experiments/differential_lr.py --mode ratio --max-steps 10000
-```
-
-### Analyze results
-
-```bash
-python experiments/analyze_results.py outputs/chunk_sweep/TIMESTAMP --type chunk_sweep
+python experiments/benchmark_tps.py
 ```
 
 ## Project Structure
 
 ```
-LinearAttention/
+DifferentialLR/
 ├── src/
-│   ├── config.py           # Hyperparameter dataclasses
-│   ├── chunked_attention.py # Core attention mechanism
-│   ├── model.py            # Full transformer
-│   ├── data.py             # Dataset loading
-│   ├── train.py            # Training loop
-│   └── diagnostics.py      # Gradient/magnitude analysis
+│   ├── config.py              # Model configuration
+│   ├── model.py               # Hybrid transformer model
+│   ├── chunked_attention.py   # Softmax attention implementation
+│   └── mamba.py               # Mamba SSM implementation
 ├── experiments/
-│   ├── baseline_sweep.py   # Chunk size & gamma sweeps
-│   ├── differential_lr.py  # Differential LR experiments
-│   └── analyze_results.py  # Post-hoc analysis
-├── configs/
-│   └── default.yaml        # Default configuration
-└── requirements.txt
+│   ├── multi_seed_validation.py    # 5-seed validation (key result)
+│   ├── frozen_ablation.py          # Module ceiling experiments
+│   ├── differential_mamba.py       # Phased training implementation
+│   ├── gated_skip_test.py          # Gated skip on well-trained model
+│   ├── gated_skip_uniform.py       # Gated skip on poorly-trained model
+│   ├── coordination_lr_ablation.py # Coordination phase analysis
+│   └── benchmark_tps.py            # Throughput measurement
+├── paper_neurips.txt          # Full paper (plain text)
+└── paper_final.txt            # Earlier version
 ```
 
-## Key Hyperparameters
+## Model Architecture
 
-### Chunk Size
-Controls the granularity of local vs global attention:
-- Smaller chunks (16-32): More cross-chunk interactions, potentially slower
-- Larger chunks (256-512): Approaches full attention, less compression
+8-layer transformer, ~45M parameters:
+- Hidden dim: 512
+- Heads: 8, Head dim: 64
+- FFN dim: 2048
+- Layers 0-3: Softmax attention
+- Layers 4-7: Mamba SSM
 
-### Gamma (decay factor)
-Controls persistence of cross-chunk state:
-- Higher gamma (0.99): More long-range memory, but slower adaptation
-- Lower gamma (0.9): Faster forgetting, more local focus
+## Training Protocol
 
-### LR Ratio
-Differential learning rates between within-chunk and cross-chunk components:
-- Ratio < 1: Cross-chunk learns slower (may help stability)
-- Ratio > 1: Cross-chunk learns faster (may help long-range)
+```python
+# Phase 1: Softmax Lead (4 epochs)
+optimizer.param_groups[1]['lr'] = 3e-4  # softmax
+optimizer.param_groups[2]['lr'] = 1e-5  # mamba
 
-## Diagnostics
+# Phase 2: Mamba Catchup (4 epochs)
+optimizer.param_groups[1]['lr'] = 1e-5  # softmax
+optimizer.param_groups[2]['lr'] = 3e-4  # mamba
 
-The framework tracks:
-- **Gradient norms**: Per-component gradient magnitudes
-- **Output magnitudes**: Within-chunk vs cross-chunk contribution sizes
-- **Learning speed**: Parameter update magnitudes over time
+# Stop at best validation PPL (typically epoch 7-8)
+# Do NOT add coordination phases
+```
 
-## Research Outputs
+## Key Insights
 
-After running experiments, the analysis script generates:
-- Perplexity vs chunk_size curves
-- Gradient magnitude plots
-- Within-chunk vs cross-chunk output magnitude ratios
-- Optimal configuration recommendations
+1. **Never freeze completely.** Use minimal LR (1e-5) to maintain module compatibility.
+
+2. **No coordination phase.** Extended training causes overfitting. Stop early.
+
+3. **Gated skips don't rescue.** When added to poorly-trained models, gates learn to keep undertrained Mamba (gate → 0.92), not bypass it.
+
+4. **Validate with multiple seeds.** Single-run results are unreliable. High variance indicates gradient interference.
+
+## Citation
+
+If you use this code, please cite:
+
+```
+@misc{differentiallr2025,
+  title={Phased Specialization: Unlocking Hybrid Sequence Models via Optimization-Aware Training},
+  author={},
+  year={2025},
+  url={https://github.com/MikeyBeez/DifferentialLR}
+}
+```
+
+## Related Work
+
+- [Mamba](https://github.com/state-spaces/mamba) - Linear-time sequence modeling
+- [PCGrad](https://arxiv.org/abs/2001.06782) - Gradient surgery for multi-task learning
+- [Switch Transformers](https://arxiv.org/abs/2101.03961) - MoE load balancing
+
+## License
+
+MIT
