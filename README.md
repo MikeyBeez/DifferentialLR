@@ -185,7 +185,6 @@ optimizer.param_groups[2]['lr'] = 3e-4  # mamba
 ## Related Work
 
 - [PEER](https://arxiv.org/abs/2407.04153) - DeepMind's Parameter Efficient Expert Retrieval (inspired our phased training)
-- [mHC](https://arxiv.org/abs/2512.24880) - DeepSeek's Manifold-Constrained Hyper-Connections for training stability
 - [Mamba](https://github.com/state-spaces/mamba) - Linear-time sequence modeling with selective state spaces
 - [PCGrad](https://arxiv.org/abs/2001.06782) - Gradient surgery for multi-task learning
 - [Switch Transformers](https://arxiv.org/abs/2101.03961) - MoE load balancing
