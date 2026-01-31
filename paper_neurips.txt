@@ -7,7 +7,7 @@ ABSTRACT
 
 Hybrid sequence models, combining the local-pattern recognition of attention mechanisms with the long-range efficiency of State Space Models (SSMs), theoretically offer the best of both worlds. However, we demonstrate that standard joint optimization frequently fails to realize these gains, often resulting in performance inferior to pure attention baselines. We identify gradient interference and learning-speed asymmetry as the primary culprits: the faster-converging attention mechanism dominates early training, preventing the SSM module from specializing.
 
-We propose Phased Specialization, a training strategy utilizing differential learning rates to decouple module optimization. In experiments on WikiText-2 using a Mamba-Transformer hybrid, our approach yields a 34-point perplexity improvement over joint training (157.5 vs 191.5) while reducing cross-seed variance from 4.3 to 1.3. Crucially, we show that architectural interventions such as gated residuals fail to rescue joint training, confirming that the bottleneck is fundamentally an optimization-level conflict rather than a capacity constraint. Our results suggest that as architectures become more heterogeneous, the one-size-fits-all training paradigm must be replaced by strategies that respect individual module dynamics.
+We propose Phased Specialization, a training strategy utilizing differential learning rates to decouple module optimization. In experiments on WikiText-2 using a Mamba-Transformer hybrid, holding architecture fixed and changing only the training schedule produces a 34-point perplexity swing (157.5 vs 191.5) while reducing cross-seed variance from 4.3 to 1.3. Crucially, we show that architectural interventions such as gated residuals fail to rescue joint training, suggesting the bottleneck is primarily an optimization-level conflict rather than a capacity constraint. Our results indicate that for heterogeneous architectures, the one-size-fits-all training paradigm may need to be replaced by strategies that respect individual module dynamics.
 
 
 1. INTRODUCTION
@@ -100,6 +100,8 @@ Phase 2, SSM Specialization, lasting 4 epochs: Attention layers receive 1e-5, Ma
 
 The key insight is that neither module is ever frozen. The minimal learning rate (1e-5) maintains compatibility and allows minor adjustments while preventing the gradient monopolization that occurs under joint training.
 
+Training details: AdamW optimizer (betas 0.9, 0.999), weight decay 0.1 for model parameters (0.0 for embeddings), gradient clipping at 1.0, no learning rate warmup or decay within phases.
+
 3.3 Approximate Block Coordinate Descent
 
 Phased Specialization can be understood as Approximate Block Coordinate Descent. Classical block coordinate descent optimizes one parameter block while holding others fixed. Our approach softens this to "optimize one block while minimally updating others."
@@ -171,11 +173,11 @@ Sequential (Softmax then Mamba, hard freeze): Best PPL 189.1
 
 Critical findings:
 
-Neither module alone reaches baseline. Softmax-only (200.9) is worse than the full softmax baseline (167.3), and Mamba-only (247.3) is worse still. Both modules are necessary.
+The 4-layer frozen experiments underperform the 8-layer baseline, as expected from reduced depth. Softmax-only (200.9) and Mamba-only (247.3) both fall short, with Mamba learning more slowly in isolation.
 
-Sequential training with hard freezing (189.1) performs nearly identically to joint training (191.5). Simply separating the phases is not enough. The 32-point gap between Sequential (189.1) and Phased Specialization (157.5) comes from the minimal learning rate (1e-5) during non-lead phases.
+Sequential training with hard freezing (189.1) performs nearly identically to joint training (191.5). Simply separating the phases is not enough. The 32-point gap between Sequential (189.1) and Phased Specialization (157.5) suggests that maintaining a small learning rate during non-lead phases improves results.
 
-The minimal LR maintains module compatibility. With complete freezing, the leading module cannot adapt to output changes from the frozen module. The 1e-5 LR provides a "compatibility signal" that keeps both modules aligned during phased training.
+We hypothesize that the minimal LR maintains module compatibility. With complete freezing, the leading module cannot adapt to output changes from the frozen module. The 1e-5 LR may provide gradient signal that keeps both modules aligned during phased training, though the exact mechanism requires further study.
 
 4.5 Failure of Architectural Rescue
 
@@ -257,13 +259,13 @@ Do not rely on architectural fixes. Gated skips and similar modifications cannot
 
 8. CONCLUSION
 
-We demonstrate that optimization dynamics, not architecture, determine whether hybrid sequence models succeed. A Mamba-Transformer hybrid performs 14% worse than baseline with joint training but 6% better with Phased Specialization. This 34-point improvement comes entirely from giving each module a protected learning window.
+We demonstrate that in our experiments, optimization dynamics dominated architectural effects for hybrid sequence models. A Mamba-Transformer hybrid performs 14% worse than baseline with joint training but 6% better with Phased Specialization. Holding architecture fixed, this 34-point swing comes from giving each module a protected learning window.
 
-The failure of gated skip connections to rescue joint training confirms that the bottleneck is optimization-level. The gate learns to keep undertrained modules rather than bypass them, demonstrating that architectural interventions cannot substitute for proper training.
+The failure of gated skip connections to rescue joint training suggests the bottleneck is primarily optimization-level. The gate learns to keep undertrained modules rather than bypass them, indicating that architectural interventions alone may not substitute for proper training.
 
 Our multi-seed experiments reveal that single-run results are unreliable. High variance under joint training indicates gradient interference, while low variance under phased training indicates a smooth optimization surface.
 
-As architectures become more heterogeneous, training protocols must evolve accordingly. The central lesson: when combining modules with different learning speeds, temporal separation of their optimization is not optional.
+As architectures become more heterogeneous, training protocols may need to evolve accordingly. The central lesson from our experiments: when combining modules with different learning speeds, temporal separation of their optimization can be critical for realizing the architecture's potential.
 
 
 APPENDIX A: MULTI-SEED RESULTS
@@ -283,8 +285,14 @@ Mean: 157.5, Std: 1.3
 
 APPENDIX B: THROUGHPUT BENCHMARKS
 
-GPU: NVIDIA GeForce RTX 5070 Ti
+Hardware and Methodology:
+GPU: NVIDIA GeForce RTX 5070 Ti (16GB VRAM)
 Model: 45M parameters, 8 layers
+Batch size: 8
+Precision: FP16 (torch.amp.autocast)
+Warmup: 10 iterations
+Benchmark: 100 iterations
+No torch.compile (raw PyTorch + Triton kernel)
 
 Sequence Length 512:
 Full Softmax: 295,000 tok/s

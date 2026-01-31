@@ -1,8 +1,8 @@
 # Phased Specialization for Hybrid Sequence Models
 
-**Training dynamics, not architecture, determine whether hybrid transformers succeed.**
+**In our experiments, training strategy dominated architectural effects for hybrid transformers.**
 
-This repository contains code and experiments demonstrating that a Mamba-Transformer hybrid performs 14% worse than baseline with joint training, but 6% better with Phased Specialization. The 34-point perplexity improvement comes entirely from the training strategy.
+This repository contains code and experiments demonstrating that a Mamba-Transformer hybrid performs 14% worse than baseline with joint training, but 6% better with Phased Specialization. Holding architecture fixed, changing only the training schedule produced a 34-point perplexity swing.
 
 Paper: [paper_neurips.txt](paper_neurips.txt)
 
@@ -46,14 +46,14 @@ Stop at epoch 8 (158.4). Extended training causes rapid overfitting (epoch 9: 18
 
 ## Ablation Results
 
-| Experiment | PPL | What It Proves |
+| Experiment | PPL | Interpretation |
 |------------|-----|----------------|
-| Frozen Mamba (Softmax only) | 200.9 | Softmax alone can't reach baseline (167.3) |
-| Frozen Softmax (Mamba only) | 247.3 | Mamba alone is even worse |
+| Frozen Mamba (4 softmax layers only) | 200.9 | 4 layers underperform 8-layer baseline |
+| Frozen Softmax (4 mamba layers only) | 247.3 | Mamba alone learns slower |
 | Sequential (hard freeze) | 189.1 | Separation alone ≈ joint training (191.5) |
-| **Phased Specialization** | **157.5** | Minimal LR provides compatibility signal |
+| **Phased Specialization** | **157.5** | Both modules contribute when properly trained |
 
-The 32-point gap between Sequential (189.1) and Phased (157.5) proves the 1e-5 LR is not just "slow training" but provides essential module compatibility signal.
+The 32-point gap between Sequential (189.1) and Phased (157.5) suggests that maintaining a small learning rate (1e-5) improves module compatibility, though the exact mechanism requires further study.
 
 ## Gated Skip Connections Don't Rescue
 
@@ -67,14 +67,19 @@ On phased-trained model (158.4 PPL): Gate → 1.0, confirming properly trained M
 
 ## Throughput
 
-The hybrid is actually **faster** than pure softmax due to Mamba's linear complexity:
+The hybrid is **faster** than pure softmax at tested sequence lengths due to Mamba's linear complexity replacing quadratic attention in layers 4-7:
 
 | Sequence Length | Full Softmax | 4S+4M Hybrid | Ratio |
 |-----------------|--------------|--------------|-------|
 | 512 | 295k tok/s | 317k tok/s | 107% |
 | 1024 | 215k tok/s | 257k tok/s | 119% |
 
-GPU: NVIDIA GeForce RTX 5070 Ti
+**Methodology:**
+- GPU: NVIDIA GeForce RTX 5070 Ti (16GB)
+- Batch size: 8
+- Precision: FP16 (torch.amp.autocast)
+- Warmup: 10 iterations, benchmark: 100 iterations
+- No torch.compile (measuring raw PyTorch + Triton kernel)
 
 ## Installation
 
