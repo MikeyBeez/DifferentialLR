@@ -79,6 +79,8 @@ Gu and Dao (2023) introduced Mamba with selective state spaces where transition 
 
 DeepMind (2024) introduced PEER (Parameter Efficient Expert Retrieval), demonstrating that differential learning rates are essential when combining heterogeneous modules at scale. Their phased training approach, where router and expert modules take turns leading, directly inspired our Phased Specialization strategy.
 
+DeepSeek (2025) proposed Manifold-Constrained Hyper-Connections (mHC), which stabilizes training by constraining residual mixing to preserve signal magnitude. We tested whether mHC could rescue joint training but found only 1.3 PPL improvement (195.2 to 193.9), compared to 37.7 PPL from Phased Specialization. This suggests the core problem is learning-speed asymmetry, not gradient magnitude instability.
+
 Our work suggests that many negative results for hybrid architectures may reflect optimization failures rather than architectural limitations.
 
 
@@ -353,6 +355,8 @@ REFERENCES
 Bengio, Y., Louradour, J., Collobert, R., & Weston, J. (2009). Curriculum learning. ICML.
 
 DeepMind. (2024). PEER: Parameter Efficient Expert Retrieval. arXiv:2407.04153.
+
+DeepSeek-AI. (2025). Manifold-Constrained Hyper-Connections. arXiv:2512.24880.
 
 Fedus, W., Zoph, B., & Shazeer, N. (2022). Switch Transformers: Scaling to trillion parameter models with simple and efficient sparsity. JMLR.
 
