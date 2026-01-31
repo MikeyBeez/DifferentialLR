@@ -2,32 +2,34 @@ ATTENTION IS A RUBE GOLDBERG MACHINE: LINEAR-TIME SEQUENCE MODELING VIA THE GOLD
 
 Abstract
 
-We propose a reinterpretation of the attention mechanism: rather than performing similarity search, attention computes a context signature, a linear combination of value vectors whose weights happen to be derived from pairwise similarities. The similarity scores serve only as scalar multipliers; the semantic content emerges from the weighted sum itself. Building on this insight, we introduce the Golden Engram, which replaces learned attention weights with fixed coefficients based on the Golden Ratio. Our bidirectional formulation achieves 1.3 perplexity on WikiText-2, comparable to standard attention at 1.2 PPL, while requiring 50% fewer parameters and O(N) complexity instead of O(N^2). We empirically verify that phi-weighted combinations produce zero collisions among 10,000 random sequences. These results suggest that for tasks where routing is primarily position-dependent rather than content-dependent, deterministic geometric weighting can match learned attention.
+Attention mechanisms compute weighted sums of value vectors. The weights come from dot products between queries and keys, which researchers have interpreted as similarity search. We question this interpretation. The dot product is simply a way to produce scalars; those scalars become weights; the weights combine vectors. The model does not search for similar tokens. It uses scalars to weight a sum.
+
+We test this by replacing the dot products with fixed constants based on the Golden Ratio. No learned scalars. No dot products. Just fixed numbers as weights. Our Golden Engram achieves 1.3 perplexity on WikiText-2, compared to standard attention at 1.2 PPL, while using 50% fewer parameters and O(N) complexity instead of O(N^2).
+
+If attention were similarity search, fixed constants should fail. They do not. This suggests the similarity interpretation is a post-hoc narrative, not the functional mechanism.
 
 
 1. Introduction
 
 The attention mechanism computes:
 
-output = sum_j ( alpha_j * V_j )
+output = sum_j ( w_j * V_j )
 
-where alpha_j = softmax(Q_i * K_j / sqrt(d))
+where w_j = softmax(Q_i * K_j / sqrt(d))
 
-The standard interpretation frames this as similarity search: the query Q finds relevant keys K, and the softmax produces a probability distribution over candidates. We propose a simpler interpretation: attention produces a context signature by linearly combining value vectors. The similarity computation merely determines the mixing coefficients.
+This is a weighted sum. The weights w_j come from scalars produced by dot products. Researchers have interpreted these dot products as measuring similarity between tokens, framing attention as a search mechanism that finds relevant information.
 
-This reframing suggests a question: must the mixing coefficients be learned through similarity, or could fixed coefficients suffice? If attention primarily routes information based on position rather than content, then a deterministic weighting scheme might work equally well.
+We argue this interpretation is wrong. The dot product is simply a function that takes two vectors and returns a scalar. That scalar becomes a weight. The weight determines how much of a value vector to include in the sum. The model learns Q and K projections that produce useful scalars. Whether those scalars correlate with human notions of similarity is incidental.
 
-We test this hypothesis using the Golden Ratio phi = 1.618 as a fixed weighting constant. Our contributions:
+To test this, we replace the dot products entirely with fixed constants. No Q. No K. No learned scalars. Just fixed numbers based on the Golden Ratio. Our contributions:
 
-First, we articulate a geometric view of attention as context signature computation, where similarity is incidental to the linear combination that produces the output.
+First, we show that attention is a weighted sum, not a search mechanism. The dot products produce scalars that become weights. The similarity interpretation is unnecessary.
 
-Second, we introduce the Golden Engram formula, which combines current, previous, and next token representations using phi and phi^(-1) as fixed weights.
+Second, we replace dot products with fixed constants based on the Golden Ratio. The model still works. This would be impossible if attention required similarity search.
 
-Third, we demonstrate that bidirectional phi-weighting achieves 1.3 PPL compared to standard attention's 1.2 PPL on WikiText-2, with 50% fewer attention parameters and O(N) complexity.
+Third, our Golden Engram achieves 1.3 PPL compared to standard attention's 1.2 PPL on WikiText-2, using 50% fewer parameters and O(N) complexity.
 
-Fourth, we prove empirically that phi-based combinations produce unique signatures with zero collisions among 10,000 random sequences.
-
-Fifth, we characterize the limitations: Golden Engram performs position-dependent routing and cannot replicate content-dependent attention patterns. This explains both its success on language modeling and its potential failure modes on tasks requiring dynamic routing.
+Fourth, we characterize when fixed weights suffice versus when learned scalars are necessary. Language modeling works with fixed weights. Tasks requiring content-dependent routing may not.
 
 
 2. Background
@@ -61,29 +63,33 @@ output_i = alpha_1 * V_1 + alpha_2 * V_2 + ... + alpha_N * V_N
 
 This is a point in the same vector space as the values V_j. The attention weights alpha_j determine where in this space the output lands. Geometrically, the output is a weighted centroid of the value vectors.
 
-3.2 Where Similarity Enters The Computation
+3.2 What Attention Actually Computes
 
-Let us trace exactly where similarity appears in attention:
+Strip away the interpretation. Here is what attention does:
 
 scores = Q @ K^T
 weights = softmax(scores)
 output = weights @ V
 
-The dot product Q_i * K_j equals |Q_i| |K_j| cos(theta), where theta is the angle between the vectors. When Q and K point in similar directions, cos(theta) is large, so the dot product is large. This is why researchers call it similarity.
+Step one: compute scalars. For each pair of positions (i, j), produce one number. Step two: normalize so each row sums to one. Step three: use those numbers as weights to combine value vectors.
 
-But here is the problem: the model does not know it is computing similarity. It learns Q and K projections that produce useful scalars. Those scalars happen to be dot products, which happen to measure angular similarity. But the model is not trying to find similar tokens. It is learning whatever scalar values make the loss decrease.
+That is the entire mechanism. Scalars become weights. Weights combine vectors.
 
-3.3 What The Scalars Actually Do
+3.3 The Dot Product Is Just A Way To Get Scalars
 
-The scalars become mixing weights after softmax normalization. A high score means include more of this value vector in the output. A low score means include less. The output is simply a weighted sum.
+The scalars come from dot products. A dot product takes two vectors and returns one number. Researchers noticed that dot products are larger when vectors point in similar directions, so they called this similarity and built a story about searching for relevant tokens.
 
-The critical question: must these weights come from similarity? Or could any method of producing position-specific scalars work equally well?
+But the model does not know this story. The model learns Q and K projections that produce useful scalars. It does not care that those scalars can be interpreted as similarity. It cares that those scalars, when used as weights, produce outputs that reduce the loss.
 
-3.4 The Similarity Interpretation May Be Post-Hoc
+3.4 Proof: Fixed Scalars Work
 
-The similarity scores Q_i * K_j produce scalars that, after softmax normalization, become the mixing coefficients alpha_j. But the similarity computation is not the source of semantic meaning. The meaning emerges from the linear combination of semantically meaningful value vectors. Similarity is one way to produce scalars; it may not be the reason attention works.
+If the dot product's function were to find similar tokens, then replacing it with fixed numbers should fail catastrophically. The model would lose its ability to search.
 
-Our experiments support this view: fixed scalars based on position work almost as well as learned similarity-based scalars. No dot product. No similarity computation. Just deterministic weights. This suggests the dot product's role is not finding similar tokens but merely producing scalars. The search for similar tokens story may be a post-hoc narrative imposed by researchers, not the functional mechanism.
+We replaced the dot products with fixed constants: phi for the previous position, phi^-1 for the next position, zero for everything else. No dot products. No learned scalars. Just three fixed numbers.
+
+Result: 1.3 PPL versus 1.2 PPL for standard attention.
+
+The model did not need to search. It did not need similarity. It needed scalars to use as weights. Any scalars work, including constants we chose arbitrarily from mathematics.
 
 3.5 When Fixed Weights Might Suffice
 
@@ -215,9 +221,13 @@ Unlike Mamba's selective gating, the gating here is fixed. This sacrifices conte
 
 7.1 Implications
 
-Decades of attention research have implicitly framed the mechanism as a semantic search procedure. Our results suggest this framing may be misguided: the similarity computation and softmax are functionally incidental. The network does not perform search; it produces deterministic linear combinations of token embeddings. From this perspective, standard attention is a Rube Goldberg machine, a complex process solving a problem that may not exist for many tasks.
+Decades of attention research have assumed the mechanism performs semantic search. Papers describe queries finding relevant keys, attention heads specializing in different relationships, models learning what information to retrieve. This entire framework assumes the dot products compute something meaningful.
 
-The billions of parameters dedicated to learning attention weights may primarily learn positional patterns that could be captured by simple fixed coefficients. This does not diminish attention's value for tasks requiring dynamic, content-dependent routing. But it suggests that hybrid architectures could use efficient fixed-weight layers for most processing, reserving expensive learned attention for layers or tasks that truly require it.
+Our results suggest otherwise. The dot products compute scalars. The scalars become weights. The weights combine vectors. That is all. The model does not search. It does not find relevant tokens. It computes a weighted sum using whatever scalars the dot products happen to produce.
+
+From this perspective, standard attention is a Rube Goldberg machine: Q and K projections, matrix multiplication, scaling, softmax, another matrix multiplication, just to produce weights for a sum. We achieve nearly identical results with fixed constants. No projections. No matrix multiplication. No softmax. Just: multiply by phi, add.
+
+The billions of parameters in attention layers may be learning nothing more than positional patterns that fixed constants capture equally well.
 
 7.2 Limitations and Honest Assessment
 
