@@ -7,80 +7,44 @@ This repository contains two research directions on efficient sequence modeling:
 
 ---
 
-## Golden Ratio Crystallization
+## Golden Ratio Crystallization (NEGATIVE RESULT)
 
 **Paper: [paper_end_of_attention.txt](paper_end_of_attention.txt)**
 
-We replace the O(N²) attention mechanism with a O(N) "crystal" that accumulates context using powers of φ⁻¹ = 0.618 (the Golden Ratio).
+**⚠️ CORRECTION: Original claims were invalid due to experimental error.**
 
-### Key Results
+We attempted to replace O(N²) attention with O(N) "crystallization" using fixed geometric decay (φ⁻¹ = 0.618). Initial results showed promising 1.4 PPL—but these were wrong.
 
-| Dataset | Crystal PPL | Attention PPL | Gap |
-|---------|-------------|---------------|-----|
-| WikiText-2 | 1.4 | 1.2 | +0.2 |
-| WikiText-103 | 1.0 | 1.0 | **0.0** |
+### What Went Wrong
 
-**At scale, the gap vanishes.** The Crystal matches attention quality on larger datasets.
+The original implementation had **bidirectional information leakage**:
+1. Backward pass saw future tokens (cheating for causal LM)
+2. Predict-after-update leaked current token
+3. Attention baseline also lacked causal mask
 
-### Why It Works
+### Corrected Results
 
-```
-h_t = φ⁻¹ * h_{t-1} + x_t
-```
+| Model | Val PPL | vs GPT-2 |
+|-------|---------|----------|
+| GPT-2 (117M, pretrained) | 44 | 1.0x |
+| 4-layer Forward-Only Crystal | 245 | 5.6x worse |
+| Single-layer CausalGoldenEngram | 1,152 | 26x worse |
+| Bidirectional Crystal (INVALID) | 1.4 | (cheating) |
 
-- **O(1) state**: Two D-dimensional vectors regardless of sequence length
-- **O(N) memory**: No quadratic attention matrix
-- **No positional encoding**: Position is encoded by the decay geometry itself
-- **Bounded magnitude**: The series 1 + φ⁻¹ + φ⁻² + ... = φ exactly
+**The Crystal is 5-26x worse than attention for causal LM, not 0.2 PPL worse.**
 
-### Memory Comparison
+### What Still Works
 
-| Sequence Length | Crystal | Attention | Savings |
-|-----------------|---------|-----------|---------|
-| 256 | 224 MB | 227 MB | 1.0x |
-| 16,384 | 1,809 MB | 8,432 MB | 4.7x |
-| 32,768 | 3,421 MB | OOM | ∞ |
+- **Memory scaling is real**: O(N) vs O(N²) confirmed
+- **Math is elegant**: φ⁻¹ decay converges to φ exactly
+- **May work for**: Bidirectional tasks (BERT-style), encoders, classification
 
-### KV Cache Elimination (Inference)
+### Lessons Learned
 
-For 100 users with 100,000-token contexts:
-
-| | Transformer | Crystal |
-|--|-------------|---------|
-| Per-user state | 1,562 MB | 2 KB |
-| Total VRAM | 153 GB | 0.2 MB |
-| **Savings** | | **800,000x** |
-
-### Limitation: Content-Dependent Retrieval
-
-The Crystal cannot "find the needle":
-
-| Task | Attention | Crystal |
-|------|-----------|---------|
-| "Copy token from 3 positions ago" | 100% | 20% |
-
-The Crystal captures *influence*, not *identity*. For language modeling (pattern recognition), this is acceptable. For retrieval tasks, attention wins.
-
-### Run the Experiments
-
-```bash
-# Multi-dataset validation (WikiText-2, WikiText-103)
-python experiments/multi_dataset_test.py
-
-# Memory scaling torture test (256 to 65k tokens)
-python experiments/infinite_context_torture.py
-
-# KV Cache elimination benchmark
-python experiments/kv_cache_death.py
-
-# Content-dependent retrieval test (Crystal's weakness)
-python experiments/recall_test.py
-
-# Ablations
-python experiments/spiral_no_pos.py           # Positional encoding ablation
-python experiments/damped_multihead_test.py   # Multi-resolution decay
-python experiments/phi_powers_test.py         # Different decay rates
-```
+1. Always verify against known baselines (GPT-2 = 44 PPL)
+2. Causal LM requires: forward-only, predict-before-update
+3. Bidirectional context gives fake-good PPL
+4. When results seem too good, they probably are
 
 ---
 
