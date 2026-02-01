@@ -7,44 +7,61 @@ This repository contains two research directions on efficient sequence modeling:
 
 ---
 
-## Golden Ratio Crystallization (NEGATIVE RESULT)
+## Golden Ratio Engram (Corrected)
 
-**Paper: [paper_end_of_attention.txt](paper_end_of_attention.txt)**
+**Paper: [papers/golden_engram_corrected.md](papers/golden_engram_corrected.md)**
 
-**⚠️ CORRECTION: Original claims were invalid due to experimental error.**
+**⚠️ CORRECTION: Original "memory system" claims were invalid. The corrected version is more useful.**
 
-We attempted to replace O(N²) attention with O(N) "crystallization" using fixed geometric decay (φ⁻¹ = 0.618). Initial results showed promising 1.4 PPL—but these were wrong.
+We originally claimed a Golden Ratio-based memory system. That was wrong—we had data leakage. After correction, we found something simpler but real: a **learnable EMA filter** that complements attention.
 
-### What Went Wrong
+### What We Actually Built
 
-The original implementation had **bidirectional information leakage**:
-1. Backward pass saw future tokens (cheating for causal LM)
-2. Predict-after-update leaked current token
-3. Attention baseline also lacked causal mask
+Not a memory system—a low-pass temporal filter (exponentially weighted moving average). This places it in the lineage of S4, Hyena, and classical signal processing.
 
-### Corrected Results
+| Model | Val PPL | Change |
+|-------|---------|--------|
+| Pure Attention (8 layers) | 8.19 | baseline |
+| Interleaved 4A + 4E | 7.86 | **-4.0%** |
 
-| Model | Val PPL | vs GPT-2 |
-|-------|---------|----------|
-| GPT-2 (117M, pretrained) | 44 | 1.0x |
-| 4-layer Forward-Only Crystal | 245 | 5.6x worse |
-| Single-layer CausalGoldenEngram | 1,152 | 26x worse |
-| Bidirectional Crystal (INVALID) | 1.4 | (cheating) |
+| Model | TPS | Change |
+|-------|-----|--------|
+| Pure Attention | 230,992 | baseline |
+| Fast Engram + compile | 341,396 | **+48%** |
 
-**The Crystal is 5-26x worse than attention for causal LM, not 0.2 PPL worse.**
+### Key Insights
 
-### What Still Works
+1. **Engrams provide momentum, not retrieval.** They're rank-1 with respect to time—they collapse history into one direction. No content-addressable lookup.
 
-- **Memory scaling is real**: O(N) vs O(N²) confirmed
-- **Math is elegant**: φ⁻¹ decay converges to φ exactly
-- **May work for**: Bidirectional tasks (BERT-style), encoders, classification
+2. **Pure engrams fail catastrophically** (PPL 3000+). This is expected and increases confidence in the corrected results.
 
-### Lessons Learned
+3. **Interleaved attention + engram works.** Attention handles retrieval; engram handles temporal smoothing. They solve different problems.
 
-1. Always verify against known baselines (GPT-2 = 44 PPL)
-2. Causal LM requires: forward-only, predict-before-update
-3. Bidirectional context gives fake-good PPL
-4. When results seem too good, they probably are
+4. **The golden ratio is not special.** φ = 0.618 gives a half-life of ~1.44 tokens. It's a hyperparameter, not magic. The name is historical.
+
+5. **The cumsum trick makes it fast.** Same vectorization used in S4/Hyena. No sequential loop needed.
+
+### Code
+
+```python
+class FastEngramLayer(nn.Module):
+    def __init__(self, dim):
+        self.proj = nn.Linear(dim, dim)
+        self.gate_proj = nn.Linear(dim, dim)
+        self.phi = 0.618
+
+    def forward(self, x):
+        B, L, D = x.shape
+        gate = torch.sigmoid(self.gate_proj(x))
+        x_gated = gate * self.proj(x)
+
+        powers = self.phi ** torch.arange(L, device=x.device)
+        x_weighted = x_gated * (1.0 / powers).view(1, -1, 1)
+        cum_sum = torch.cumsum(x_weighted, dim=1)
+        return cum_sum * powers.view(1, -1, 1)
+```
+
+See [experiments/fast_engram_test.py](experiments/fast_engram_test.py) for full implementation.
 
 ---
 
@@ -176,7 +193,12 @@ DifferentialLR/
 │   └── mamba.py               # Mamba SSM with Triton kernel
 ├── experiments/
 │   │
-│   │ # Golden Ratio Crystallization
+│   │ # Golden Ratio Engram (Corrected)
+│   ├── fast_engram_test.py         # Fast vectorized engram implementation
+│   ├── interleaved_4a4e_test.py    # Interleaved attention + engram
+│   ├── pure_attention_tps.py       # Attention baseline benchmarks
+│   │
+│   │ # Golden Ratio Crystallization (Superseded)
 │   ├── multi_dataset_test.py       # WikiText-2/103 validation
 │   ├── infinite_context_torture.py # Memory scaling up to 65k tokens
 │   ├── kv_cache_death.py           # Inference state comparison
@@ -197,7 +219,10 @@ DifferentialLR/
 │   ├── coordination_lr_ablation.py # Coordination phase analysis
 │   └── benchmark_tps.py            # Throughput measurement
 │
-├── paper_end_of_attention.txt # Golden Crystallization paper
+├── papers/
+│   ├── golden_engram_corrected.md  # Corrected Golden Ratio Engram paper
+│   └── golden_engram_corrected.txt # Plain text version
+├── paper_end_of_attention.txt # Golden Crystallization paper (superseded)
 ├── paper_neurips.txt          # Phased Specialization paper
 └── paper_final.txt            # Earlier version
 ```
