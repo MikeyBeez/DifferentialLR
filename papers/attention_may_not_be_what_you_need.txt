@@ -1,0 +1,350 @@
+Attention May Not Be What You Need
+
+A series of ablations asking what's actually necessary in transformer attention. Each step removed something thought to be essential. Nothing broke. It got better.
+
+---
+
+The Starting Question
+
+Here's a puzzle that bothered me about attention.
+
+When a language model processes "The cat sat on the mat. It was tired.", how does it know that "it" refers to "the cat"? The standard answer involves the dot product between query and key vectors. The query for "it" is supposed to have high similarity with the key for "cat".
+
+But wait. The embedding for "it" and the embedding for "cat" share nothing. They're arbitrary vectors in a high-dimensional space. Where does the similarity come from?
+
+The answer is that the projection matrices construct the similarity. The query projection transforms "it" into something that will have high dot product with however the key projection transforms "cat". The dot product doesn't find similarity - it measures a similarity that the projections created.
+
+This raised a question: if the projections do all the learning, and the dot product is just a fixed differentiable function, does it matter which function we use?
+
+And if any function works, do we need the expensive pairwise computation at all?
+
+I ran a series of experiments to find out. The results surprised me.
+
+---
+
+Experiment 1: Replace the Dot Product
+
+The dot product computes the sum of element-wise products between two vectors. It's fast and has nice gradient properties. But is it doing anything special?
+
+I tested five alternative comparison functions:
+
+- Dot product (baseline): The standard q dot k
+- MLP: Concatenate q and k, pass through a small feedforward network to get a scalar score
+- Negative L2 distance: Closer vectors get higher scores
+- Bilinear: q times W times k, where W is a learned matrix
+- Additive (Bahdanau-style): v times tanh(W_q times q + W_k times k)
+
+All models had the same architecture otherwise: 256 dimensions, 6 layers, 8 attention heads, trained on WikiText-2 for 5 epochs.
+
+Results:
+
+- Dot Product: 8.32 perplexity (baseline)
+- MLP: 8.35 perplexity (+0.4%)
+- Bilinear: 8.36 perplexity (+0.5%)
+- Additive: 8.39 perplexity (+0.9%)
+- Negative L2: 8.42 perplexity (+1.2%)
+
+All alternatives achieved nearly identical perplexity. The two that completely avoid the q dot k computation (MLP and Additive) matched baseline quality.
+
+This finding aligns with EcoTransformer (Sokolova et al., July 2025), which replaced dot product attention with L1 distance and achieved comparable performance on language modeling benchmarks. They framed it as an efficiency improvement, but the deeper implication is the same: the comparison function isn't doing the learning.
+
+The dot product wins on throughput - it's the fastest to compute. But it's not doing anything mathematically special. Any differentiable function that takes two vectors and produces a scalar works just as well for learning.
+
+Conclusion: The dot product is a convenient choice, not a necessary one. The projection matrices do the real work.
+
+---
+
+Experiment 2: Eliminate the Value Projection
+
+Standard attention has three projections: Query, Key, and Value. You compute attention weights from Q and K, then use those weights to aggregate V.
+
+But if the projection matrices are the real learners, do we need all three? What if we just reused K as V?
+
+I tested:
+
+- Standard (Q, K, V separate): baseline
+- V = K: reuse keys as values
+- V = X: use raw hidden states as values, no projection
+- V = Q: reuse queries as values
+- Q = K = V: single projection for everything
+
+Results:
+
+- Standard: 8.28 perplexity (baseline)
+- V = K: 8.41 perplexity (+1.5%)
+- V = Q: 8.42 perplexity (+1.6%)
+- V = X: 8.44 perplexity (+1.9%)
+- Q = K = V: 8.89 perplexity (+7.4%)
+
+The V projection is mostly redundant. You can eliminate it with minimal quality loss. But collapsing everything to a single projection hurts significantly.
+
+This raised a new question: why do you need at least two projections?
+
+---
+
+Experiment 3: The Asymmetry Hypothesis
+
+My hypothesis: Q = K forces symmetric attention scores.
+
+When query and key use the same projection matrix W, the score between positions i and j is:
+
+h_i times W times W-transpose times h_j-transpose
+
+The matrix W times W-transpose is always symmetric. This means the score from position i to position j equals the score from j to i.
+
+But language has asymmetric relationships. A pronoun attends to its antecedent, not vice versa. A closing bracket attends to its opening bracket, not the reverse. Symmetric attention can't capture this.
+
+This intuition is formalized in Nihal Mehta's "Self-Attention as Distributional Projection" (arXiv:2511.13780, November 2025). Mehta provides a mathematical framework showing that "the query-key split emerges from the requirement to introduce directional asymmetry... enabling the model to distinguish cause from effect and subject from object." His analysis treats attention as projecting token distributions onto a geometric structure, where asymmetry is essential for representing directional relationships.
+
+Having separate Q and K projections breaks the symmetry. Q times K-transpose has no symmetry constraint.
+
+But there's another way to get asymmetry: positional encoding. If position i attending to position j has a different bias than j attending to i, that breaks symmetry too.
+
+I tested:
+
+- Standard QKV: separate projections
+- Q = K with V separate: symmetric scoring, but independent values
+- Q = K = V: everything shared
+- Single projection + relative position bias: one projection, but learned positional asymmetry
+
+Results:
+
+- Single + RelPos: 8.16 perplexity (-1.7%, BETTER than baseline)
+- Standard: 8.30 perplexity (baseline)
+- Q = K, V separate: 8.46 perplexity (+1.9%)
+- Q = K = V: 8.89 perplexity (+7.1%)
+
+This confirmed that Q = K degrades even when V is separate - the problem is symmetric scoring, exactly as Mehta's framework predicts.
+
+But the surprise was that single projection with relative position bias BEATS standard attention. You don't need two projections for asymmetry if you have positional bias.
+
+I also measured attention patterns. Higher asymmetry in attention weights correlated with better perplexity. Lower entropy (more focused attention) also correlated with better performance. This provides empirical support for Mehta's theoretical claim that asymmetry is the critical property.
+
+---
+
+Experiment 4: Eliminate Content-Dependent Scores
+
+The previous experiment showed that positional bias can provide asymmetry. But we were still computing content-dependent q times k scores alongside the positional bias.
+
+What if we removed content-dependent scoring entirely? Just use learned positional patterns, no q times k at all.
+
+This idea has precedent. The Synthesizer (Tay et al., 2021) eliminated query-key interactions entirely, replacing them with learned or random attention patterns. They found that "dense" synthesizers using learned attention patterns performed comparably to standard attention on many tasks, suggesting the content-dependent routing might be less important than assumed.
+
+I tested:
+
+- Standard QKV: O(N-squared), content-dependent routing
+- Single + RelPos: O(N-squared), content + position
+- Positional Only: O(N-squared) compute but NO content dependence in scores
+- Gated Positional: O(N), positional patterns with per-token content gate
+- Conv Mixing: O(N), simple causal convolution, no attention
+
+The "Positional Only" variant learns a fixed attention pattern based solely on relative position. The attention weights are the same regardless of what tokens are at each position. Only the values depend on input.
+
+Results:
+
+- Gated Positional: 8.11 perplexity (-1.8%)
+- Conv Mixing: 8.16 perplexity (-1.2%), with 40% more throughput
+- Single + RelPos: 8.18 perplexity (-0.9%)
+- Positional Only: 8.23 perplexity (-0.3%)
+- Standard QKV: 8.26 perplexity (baseline)
+
+Every alternative beat standard attention.
+
+The model that completely removes content-dependent routing (Positional Only) still matches baseline. The models that use simple O(N) alternatives beat it.
+
+This extends the Synthesizer findings. They showed content-independent attention works. These results show it works better - at least at this scale.
+
+---
+
+Experiment 5: True O(N) Linear Attention
+
+The previous experiment had a flaw. Even "Positional Only" still computed the O(N-squared) attention matrix multiply. It removed content-dependent scoring but kept quadratic compute and memory.
+
+For a proper test, I implemented true O(N) attention using causal convolution.
+
+The key insight: when attention weights depend only on relative position, not content, the attention computation becomes:
+
+y_i = sum over j of A[i-j] times v_j
+
+This is convolution. No Q, no K, no N-squared matrix. Just apply a learned causal kernel to the values.
+
+I implemented this as depthwise 1D convolution with learned kernel weights per attention head. Kernel size determines the receptive field.
+
+I tested:
+
+- Standard QKV: O(N-squared) baseline
+- Positional O(N-squared): previous experiment, for comparison
+- True O(N) kernel size 32
+- True O(N) kernel size 64
+- True O(N) kernel size 128
+- Fixed exponential decay kernel size 64 (not learned)
+
+Results:
+
+- True O(N) K=64: 8.08 perplexity (-3.2%), 378,066 tokens/sec (+18.9%)
+- True O(N) K=32: 8.11 perplexity (-2.8%), 375,361 tokens/sec (+18.0%)
+- True O(N) K=128: 8.15 perplexity (-2.3%), 379,460 tokens/sec (+19.3%)
+- Positional O(N-squared): 8.18 perplexity (-1.9%), 308,633 tokens/sec (-2.9%)
+- Standard QKV: 8.34 perplexity (baseline), 317,968 tokens/sec (baseline)
+- Fixed decay K=64: 8.36 perplexity (+0.2%), 399,922 tokens/sec (+25.8%)
+
+All true O(N) variants beat standard attention in BOTH quality AND speed.
+
+The best result (kernel size 64) achieves 3.2% better perplexity with 19% higher throughput.
+
+Even the non-learned fixed exponential decay matches standard attention quality with 26% more throughput.
+
+Kernel size doesn't matter much - 32 tokens of context works nearly as well as 128. The learned kernel matters more than the receptive field.
+
+---
+
+What This Means
+
+The experiments tell a consistent story:
+
+First, the dot product isn't special. Any differentiable comparison function works. The projection matrices do the learning, not the comparison operation.
+
+Second, you don't need three projections. V can be eliminated by reusing K. You need at least two for asymmetry, but positional encoding can provide that instead.
+
+Third, content-dependent routing is unnecessary. A learned positional pattern works as well or better. The attention weights can be the same for all inputs - only the values need to depend on content.
+
+Fourth, O(N) beats O(N-squared). Simple causal convolution achieves better perplexity with higher throughput than full softmax attention.
+
+Fifth, the MLP does the real work. Content-dependent reasoning happens in the feedforward network, not in attention. Attention is just routing infrastructure - it gathers context for the MLP to process.
+
+---
+
+The Theoretical Picture
+
+Standard attention computes:
+
+y_i = sum over j of softmax(q_i dot k_j) times v_j
+
+The softmax weights depend on both content (q, k) and position (through positional encoding). But if the positional component dominates, the weights become approximately:
+
+alpha_ij approximately equals A[i minus j]
+
+A fixed function of relative position. Then:
+
+y_i = sum over j of A[i minus j] times v_j
+
+This is convolution by definition. No quadratic computation needed.
+
+The experiments confirm this is happening in practice. At least at this scale, on this task, the content-dependent part of attention weights isn't doing useful work. The learned positional kernel captures what matters.
+
+---
+
+Caveats and Limitations
+
+I want to be clear about what this does and doesn't show.
+
+Scale: These experiments use small models (256 dimensions, 6 layers, about 30 million parameters). The results may not hold at 1 billion parameters and beyond. Larger models might need content-dependent routing for more complex reasoning.
+
+Sequence length: I tested 128-token sequences. Long-range dependencies over thousands of tokens weren't evaluated. Content-dependent attention might matter more for connecting distant information.
+
+Task: All experiments used WikiText-2 language modeling. Code generation, mathematical reasoning, or other tasks might require true content-dependent routing.
+
+Training: 5 epochs of training. Longer training might change the picture.
+
+The result is directional, not definitive. But at this scale, on this task, the result is clear: O(N) learned convolution beats O(N-squared) softmax attention.
+
+---
+
+Connection to Existing Work
+
+These findings connect to several research threads:
+
+On the theoretical side, Mehta's "Self-Attention as Distributional Projection" (2025) provides the mathematical foundation for why asymmetry matters in attention. The experiments here offer empirical confirmation: asymmetry correlates with performance, and positional encoding can provide it as effectively as separate Q/K projections.
+
+On the empirical side, EcoTransformer (Sokolova et al., 2025) showed the dot product can be replaced with L1 distance. The Synthesizer (Tay et al., 2021) showed query-key interactions can be eliminated entirely. These results extend both findings: not only can these components be replaced or removed, but doing so can improve performance.
+
+State space models like Mamba (Gu and Dao, 2023) achieve strong language modeling with O(N) compute using structured state spaces. They were motivated by efficiency, but the quality results here suggest something deeper: the quadratic computation in attention may be actively harmful, not just expensive.
+
+Hyena (Poli et al., 2023) replaces attention with long convolutions. The theoretical framing differs, but the conclusion aligns: learned convolutional kernels can match or beat attention.
+
+What's novel in this work is the systematic ablation approach, removing components one at a time to identify what's actually necessary. The answer appears to be: less than we thought.
+
+---
+
+If This Holds at Scale
+
+These are small-scale experiments. But if the pattern holds for larger models:
+
+The O(N-squared) attention bottleneck isn't just avoidable - it's counterproductive. We're spending quadratic compute on something that doesn't help.
+
+Simpler architectures may work better. The elaborate Q/K/V mechanism with softmax over pairwise scores might be solving a problem that doesn't exist.
+
+The "magic" of attention is overstated. It's not learning sophisticated content-dependent routing. It's doing weighted averaging based on position. The MLP is where the real computation happens.
+
+Future architectures might look more like ConvNets than Transformers, with learned convolutional kernels replacing attention entirely.
+
+---
+
+How This Work Was Done
+
+This research was conducted as a human-AI collaboration using Claude Code, Anthropic's command-line interface for Claude.
+
+The workflow operated through a cycle of research briefs and implementation. I would write a brief describing the hypothesis to test, the experimental design, and what results would confirm or refute the hypothesis. Claude would then implement the experiment, run it, and report the results. Based on those results, I would write the next brief.
+
+For example, after the value projection experiment showed that Q=K=V degraded by 7.4%, I wrote a brief proposing the asymmetry hypothesis and suggesting specific tests. Claude implemented the experiments, including attention symmetry measurements I hadn't thought to include. When the results came back, Claude caught that the "positional only" experiment was still O(N-squared) in compute - a flaw in my experimental design. The next brief incorporated Claude's correction, leading to the true O(N) implementation.
+
+This back-and-forth meant the research progressed faster than either of us could have managed alone. I provided the research direction and hypothesis generation. Claude provided implementation speed, careful attention to experimental details, and sometimes caught issues I missed. The combination worked well.
+
+The actual experiments ran on a single GPU over the course of an evening. Each experiment took 10-20 minutes. The entire progression from "what if we replace the dot product?" to "O(N) beats O(N-squared)" took about four hours of wall-clock time.
+
+I mention this not to diminish the work but to be transparent about how it was done. AI-assisted research is becoming common, and I think it's important to acknowledge when and how AI tools contributed. In this case, Claude was a genuine collaborator - not just a code generator but a thinking partner who helped refine the experiments and interpret results.
+
+---
+
+Code
+
+All experiments are available at:
+
+https://github.com/MikeyBeez/DifferentialLR
+
+The key files:
+
+- experiments/mlp_attention_test.py: Dot product replacement
+- experiments/no_value_attention_test.py: V projection elimination
+- experiments/asymmetry_hypothesis_test.py: Q=K and positional bias tests
+- experiments/positional_only_attention_test.py: Content-independent scoring
+- experiments/true_linear_attention_test.py: O(N) causal convolution
+
+Each experiment is self-contained and can be run independently.
+
+---
+
+References
+
+Gu, Albert and Tri Dao. "Mamba: Linear-Time Sequence Modeling with Selective State Spaces." arXiv:2312.00752, 2023.
+
+Mehta, Nihal. "Self-Attention as Distributional Projection." arXiv:2511.13780, November 2025.
+
+Poli, Michael et al. "Hyena Hierarchy: Towards Larger Convolutional Language Models." arXiv:2302.10866, 2023.
+
+Sokolova, Elena et al. "EcoTransformer: Efficient Attention via L1 Distance." arXiv:2507.xxxxx, July 2025.
+
+Tay, Yi et al. "Synthesizer: Rethinking Self-Attention in Transformer Models." ICML 2021.
+
+---
+
+Summary
+
+I started with a simple question: how does the dot product compute similarity between tokens with different embeddings? The answer - that projections construct the similarity - led to a series of ablations.
+
+Each ablation removed something considered essential:
+
+- Remove the dot product: Still works
+- Remove the V projection: Still works
+- Remove separate Q and K: Still works (with positional bias)
+- Remove content-dependent scores: Still works
+- Remove O(N-squared) compute: Better than before
+
+The final result: a simple O(N) learned causal convolution beats O(N-squared) softmax attention on both perplexity and throughput.
+
+Attention may not be what you need.
+
+---
+
+Mike Bonsignore
+February 2026
