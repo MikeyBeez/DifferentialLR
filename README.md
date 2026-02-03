@@ -1,9 +1,48 @@
 # Linear Attention Research
 
-This repository contains two research directions on efficient sequence modeling:
+This repository contains three research directions on efficient sequence modeling:
 
-1. **Golden Ratio Crystallization** - Replacing attention with fixed geometric decay (NEW)
-2. **Phased Specialization** - Training strategy for hybrid Mamba-Transformer models
+1. **Attention Ablation** - What's actually necessary in attention? O(N) beats O(N²) (NEW)
+2. **Golden Ratio Engram** - Learnable EMA filter that complements attention
+3. **Phased Specialization** - Training strategy for hybrid Mamba-Transformer models
+
+---
+
+## Attention May Not Be What You Need (NEW)
+
+**Paper: [papers/attention_may_not_be_what_you_need.txt](papers/attention_may_not_be_what_you_need.txt)**
+
+A series of ablations asking what's actually necessary in transformer attention. Each step removed something thought to be essential. Nothing broke. It got better.
+
+### Key Result
+
+**O(N) learned causal convolution beats O(N²) softmax attention** on both perplexity AND throughput:
+
+| Model | PPL | Change | TPS | Change |
+|-------|-----|--------|-----|--------|
+| True O(N) K=64 | 8.08 | **-3.2%** | 378,066 | **+18.9%** |
+| Standard QKV | 8.34 | baseline | 317,968 | baseline |
+
+### Experimental Progression
+
+1. **Dot product replacement** ([mlp_attention_test.py](experiments/mlp_attention_test.py)): Any comparison function works. MLP, L2, bilinear all within 1.2% of baseline.
+
+2. **V projection elimination** ([no_value_attention_test.py](experiments/no_value_attention_test.py)): V=K works with only 1.5% degradation. The value projection is mostly redundant.
+
+3. **Asymmetry hypothesis** ([asymmetry_hypothesis_test.py](experiments/asymmetry_hypothesis_test.py)): Q=K forces symmetric scores, hurting performance. But relative position bias provides asymmetry AND beats standard attention (-1.7%).
+
+4. **Content-independent scores** ([positional_only_attention_test.py](experiments/positional_only_attention_test.py)): Learned positional patterns without content-dependent Q·K scores. Every variant beat standard attention.
+
+5. **True O(N) implementation** ([true_linear_attention_test.py](experiments/true_linear_attention_test.py)): Causal convolution with learned kernel. 3.2% better perplexity, 19% higher throughput.
+
+### Conclusions
+
+- The dot product isn't special - any differentiable comparison works
+- Content-dependent routing is unnecessary - positional patterns suffice
+- The MLP does the real work - attention is just routing infrastructure
+- O(N) beats O(N²) at this scale
+
+See the paper for full details, caveats, and connections to Mamba/Hyena/Synthesizer.
 
 ---
 
@@ -193,6 +232,13 @@ DifferentialLR/
 │   └── mamba.py               # Mamba SSM with Triton kernel
 ├── experiments/
 │   │
+│   │ # Attention Ablation (NEW)
+│   ├── mlp_attention_test.py            # Dot product replacement
+│   ├── no_value_attention_test.py       # V projection elimination
+│   ├── asymmetry_hypothesis_test.py     # Q=K and positional bias tests
+│   ├── positional_only_attention_test.py # Content-independent scoring
+│   ├── true_linear_attention_test.py    # True O(N) causal convolution
+│   │
 │   │ # Golden Ratio Engram (Corrected)
 │   ├── fast_engram_test.py         # Fast vectorized engram implementation
 │   ├── interleaved_4a4e_test.py    # Interleaved attention + engram
@@ -220,6 +266,7 @@ DifferentialLR/
 │   └── benchmark_tps.py            # Throughput measurement
 │
 ├── papers/
+│   ├── attention_may_not_be_what_you_need.txt  # Attention ablation paper (NEW)
 │   ├── golden_engram_corrected.md  # Corrected Golden Ratio Engram paper
 │   └── golden_engram_corrected.txt # Plain text version
 ├── paper_end_of_attention.txt # Golden Crystallization paper (superseded)
