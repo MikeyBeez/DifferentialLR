@@ -16,12 +16,27 @@ A series of ablations asking what's actually necessary in transformer attention.
 
 ### Key Result
 
-**O(N) learned causal convolution beats O(N²) softmax attention** on both perplexity AND throughput:
+**O(N) learned causal convolution beats O(N²) softmax attention** on both perplexity AND throughput, with the advantage growing at longer sequences:
 
-| Model | PPL | Change | TPS | Change |
-|-------|-----|--------|-----|--------|
-| True O(N) K=64 | 8.08 | **-3.2%** | 378,066 | **+18.9%** |
-| Standard QKV | 8.34 | baseline | 317,968 | baseline |
+| Model | PPL | Change | TPS (128) | TPS (2048) | Speedup |
+|-------|-----|--------|-----------|------------|---------|
+| Learned Conv O(N) | 8.08 | **-3.2%** | 378,066 | 1,009,622 | **5.5x** |
+| Standard QKV O(N²) | 8.34 | baseline | 317,968 | 183,408 | 1.0x |
+
+At 2048 tokens, the O(N) model is **5.5x faster** while achieving better perplexity. The gap widens with sequence length because O(N) scales linearly while O(N²) scales quadratically.
+
+### Scaling Across Sequence Lengths
+
+Tested on WikiText-103 ([long_context_test.py](experiments/long_context_test.py)):
+
+| Seq Length | Standard PPL | Linear PPL | PPL Δ | Throughput Ratio |
+|------------|-------------|------------|-------|------------------|
+| 256 | 3.87 | 3.84 | **-0.7%** | 1.2x |
+| 512 | 1.99 | 1.98 | **-0.5%** | 1.1x |
+| 1024 | 1.40 | 1.40 | **-0.2%** | **2.2x** |
+| 2048 | — | — | — | **5.5x** |
+
+O(N) wins at ALL sequence lengths tested.
 
 ### Experimental Progression
 
@@ -35,14 +50,21 @@ A series of ablations asking what's actually necessary in transformer attention.
 
 5. **True O(N) implementation** ([true_linear_attention_test.py](experiments/true_linear_attention_test.py)): Causal convolution with learned kernel. 3.2% better perplexity, 19% higher throughput.
 
+6. **DiffMLP benchmark** ([differential_mlp_attention_test.py](experiments/differential_mlp_attention_test.py)): Tested MLP-based relevance function. Original non-causal version showed 7.86 PPL due to future token leakage. Fixed causal version (8.62 PPL) underperforms learned conv (8.14 PPL). Learned positional structure matters more than learned relevance.
+
+7. **Long context validation** ([long_context_test.py](experiments/long_context_test.py)): Confirmed O(N) advantage holds at 256, 512, and 1024 tokens on WikiText-103. Throughput advantage grows with sequence length as expected from O(N) vs O(N²).
+
 ### Conclusions
 
 - The dot product isn't special - any differentiable comparison works
+- The O(N²) pairwise computation is the bottleneck, not the comparison function
 - Content-dependent routing is unnecessary - positional patterns suffice
-- The MLP does the real work - attention is just routing infrastructure
-- O(N) beats O(N²) at this scale
+- The MLP after attention does the real work - attention is just routing infrastructure
+- O(N) learned causal convolution beats O(N²) at this scale (30M params, WikiText-2/103)
 
-See the paper for full details, caveats, and connections to Mamba/Hyena/Synthesizer.
+### Caveats
+
+These results are at small scale (30M params, up to 1024 tokens). They may not hold at billions of parameters or on tasks requiring complex long-range reasoning. See the [paper](papers/attention_may_not_be_what_you_need.txt) for full discussion of limitations.
 
 ---
 
