@@ -1,0 +1,115 @@
+I Asked GitHub If AI Can Post to Discussions. The AI Posted the Question.
+
+I wanted to know if it's okay to use AI to post to GitHub Discussions.
+So I asked Claude to post the question for me.
+
+It worked.
+
+Here's the entire workflow:
+
+
+STEP 1: GET THE CATEGORY ID
+
+gh api graphql -f query='
+{
+  repository(owner: "community", name: "community") {
+    discussionCategories(first: 20) {
+      nodes {
+        id
+        name
+      }
+    }
+  }
+}'
+
+
+STEP 2: GET THE REPO ID
+
+gh api graphql -f query='
+{
+  repository(owner: "community", name: "community") {
+    id
+  }
+}'
+
+
+STEP 3: POST
+
+gh api graphql -f query='
+mutation {
+  createDiscussion(input: {
+    repositoryId: "R_kgDOEfmk4A",
+    categoryId: "DIC_kwDOEfmk4M4B92AT",
+    title: "AI-assisted posting to GitHub Discussions - within ToS?",
+    body: "Your content here..."
+  }) {
+    discussion {
+      url
+    }
+  }
+}'
+
+
+That's it. Three API calls. The discussion is live:
+https://github.com/orgs/community/discussions/186513
+
+
+STEP 4: POST ANOTHER ONE
+
+To demonstrate the workflow, I had Claude post a second discussion about
+my attention research:
+
+gh api graphql -f query='
+mutation {
+  createDiscussion(input: {
+    repositoryId: "R_kgDOEfmk4A",
+    categoryId: "DIC_kwDOEfmk4M4B92AT",
+    title: "O(N) Convolution Beats O(N²) Attention: 5.5x Speedup at 2048 Tokens",
+    body: "A series of ablation experiments on transformer attention..."
+  }) {
+    discussion {
+      url
+    }
+  }
+}'
+
+That post summarizes findings from my paper "Attention May Not Be What You
+Need" - learned causal convolution achieves 3.2% better perplexity AND 5.5x
+faster throughput at 2048 tokens compared to standard softmax attention.
+
+Full paper: https://doi.org/10.5281/zenodo.18498944
+Discussion: https://github.com/orgs/community/discussions/186514
+
+Two posts, five minutes, zero copy-paste into web forms
+
+
+WHAT I'M BUILDING
+
+I call it an "idea commons" - a public repo where insights from human-AI
+conversations become searchable Discussion posts. The workflow:
+
+1. Human and AI have a conversation
+2. AI drafts a Discussion post
+3. Human reviews and approves
+4. AI posts via API
+
+The AI is a drafting tool, not an autonomous poster. Every post is
+human-approved.
+
+
+WHY THIS MATTERS
+
+Right now, useful ideas die in chat windows. You have a breakthrough
+conversation with an AI, close the tab, and it's gone. GitHub Discussions
+gives those ideas a permanent, searchable, forkable home.
+
+The question I posted is real - I genuinely want to know if this is within
+GitHub's ToS before building it out. But the fact that I could ask the
+question using the thing I'm asking about suggests the tooling is ready.
+
+Someone's going to build this. Might as well be me.
+
+
+---
+Mike Bonsignore
+https://github.com/MikeyBeez
