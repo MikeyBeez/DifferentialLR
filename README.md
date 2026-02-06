@@ -54,6 +54,16 @@ O(N) wins at ALL sequence lengths tested.
 
 7. **Long context validation** ([long_context_test.py](experiments/long_context_test.py)): Confirmed O(N) advantage holds at 256, 512, and 1024 tokens on WikiText-103. Throughput advantage grows with sequence length as expected from O(N) vs O(N²).
 
+8. **Associative recall test** ([associative_recall_test.py](experiments/associative_recall_test.py)): **Critical limitation found.** Tested retrieval of specific tokens from long range (Key-Value task). Results:
+
+| Distance | Standard O(N²) | Conv K=64 | Conv K=256 |
+|----------|----------------|-----------|------------|
+| 30       | 100% ✓         | 99.8% ✓   | 75% ~      |
+| 62       | 100% ✓         | 80% ~     | 10% ✗      |
+| 126+     | 99% ✓          | ~1% ✗     | ~1% ✗      |
+
+Conv fails beyond kernel size. It's a **local feature extractor**, not recurrent memory. Works for language modeling (high local correlation) but fails precise retrieval.
+
 ### Conclusions
 
 - The dot product isn't special - any differentiable comparison works
@@ -64,7 +74,14 @@ O(N) wins at ALL sequence lengths tested.
 
 ### Caveats
 
-These results are at small scale (30M params, up to 1024 tokens). They may not hold at billions of parameters or on tasks requiring complex long-range reasoning. See the [paper](papers/attention_may_not_be_what_you_need.txt) for full discussion of limitations.
+**⚠️ Important limitation:** The associative recall test (experiment 8) shows that causal convolution **cannot retrieve specific tokens from beyond kernel size**. This is a fundamental architectural constraint, not a training issue.
+
+What this means:
+- **Conv works for:** Language modeling, text generation, tasks with high local correlation
+- **Conv fails for:** Precise retrieval, "what was token X?", needle-in-haystack tasks
+- **Implication:** Hybrid architectures (conv + sparse attention) may be needed for general-purpose models
+
+These results are at small scale (30M params, up to 1024 tokens). The perplexity advantage is real but the architecture is specialized, not a general attention replacement. See the [paper](papers/attention_may_not_be_what_you_need.txt) for full discussion.
 
 ---
 
