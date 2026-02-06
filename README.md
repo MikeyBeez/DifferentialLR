@@ -50,7 +50,7 @@ O(N) wins at ALL sequence lengths tested.
 
 5. **True O(N) implementation** ([true_linear_attention_test.py](experiments/true_linear_attention_test.py)): Causal convolution with learned kernel. 3.2% better perplexity, 19% higher throughput.
 
-6. **DiffMLP benchmark** ([differential_mlp_attention_test.py](experiments/differential_mlp_attention_test.py)): Tested MLP-based relevance function. Original non-causal version showed 7.86 PPL due to future token leakage. Fixed causal version (8.62 PPL) underperforms learned conv (8.14 PPL). Learned positional structure matters more than learned relevance.
+6. **DiffMLP benchmark** ([differential_mlp_attention_test.py](experiments/differential_mlp_attention_test.py)): Tested MLP-based relevance function. **Data leak found and fixed:** Original used `torch.sum(..., dim=1)` which aggregates ALL positions including future tokens—a causal violation. Fixed with `torch.cumsum(..., dim=1)` so position i only sees 0..i. Results: original (cheating) 7.86 PPL, fixed (causal) 8.62 PPL (+3.7%), learned conv 8.14 PPL (-2.1%). Learned positional structure outperforms learned relevance.
 
 7. **Long context validation** ([long_context_test.py](experiments/long_context_test.py)): Confirmed O(N) advantage holds at 256, 512, and 1024 tokens on WikiText-103. Throughput advantage grows with sequence length as expected from O(N) vs O(N²).
 
