@@ -276,6 +276,37 @@ Smaller batches for longer sequences. The total gradient signal stays similar (m
 
 ---
 
+Inference with KV Cache
+
+A practical question: how does routed attention work with KV caching during autoregressive generation?
+
+The challenge: if position i routes to conv (no attention), it has no K/V cached. But position j might route to attention and need to attend to position i.
+
+The solution: always cache K/V, route only the aggregation.
+
+Every position computes and caches K, V (cheap O(1) projections). Only the expensive O(N) attention aggregation is routed:
+
+- Attention-routed positions: full Q·K^T aggregation over cache
+- Conv-routed positions: skip aggregation, use O(1) convolution
+
+Measured on GPU:
+
+| Operation | Latency | Scaling |
+|-----------|---------|---------|
+| Attention | ~335 μs | O(N) |
+| Conv (k=64) | ~148 μs | O(1) |
+| Speedup | 2.3x | - |
+
+Effective inference speedup:
+
+- At 99.7% conv (distance 126): ~2.2x speedup
+- At 75% conv (distance 510): ~1.45x speedup
+- At 10% conv (distance 1024): ~1.06x speedup
+
+Memory is unchanged - must keep full KV cache since any future position might use attention. The savings are purely computational.
+
+---
+
 What This Means
 
 Routed attention proves that O(N²) computation isn't necessary everywhere - just where it matters.

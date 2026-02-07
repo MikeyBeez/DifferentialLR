@@ -204,7 +204,56 @@ The optimal λ depends on the accuracy-efficiency tradeoff requirements of the a
 
 ---
 
-## 6. Limitations
+## 6. Inference with KV Cache
+
+A practical concern for autoregressive generation: how does routed attention interact with KV caching?
+
+### 6.1 The Challenge
+
+Standard transformer inference caches key and value projections to avoid recomputation. With routed attention:
+- If position i routes to conv, it has no K/V cached
+- If position j routes to attention, it may need to attend to position i
+- The cache becomes inconsistent
+
+### 6.2 Solution: Always Cache, Route Aggregation
+
+We adopt the strategy: **cache K/V for all positions, route only the aggregation**.
+
+Every position computes and caches K, V (cheap O(1) projections). Only the expensive O(N) attention aggregation (Q·K^T) is routed:
+- **Attention-routed positions**: Full aggregation over cached K/V
+- **Conv-routed positions**: Skip aggregation, use O(1) convolution over last `kernel_size` hidden states
+
+### 6.3 Empirical Results
+
+We measure per-token latency on GPU (RTX 5070 Ti):
+
+| Operation | Latency | Scaling |
+|-----------|---------|---------|
+| Attention aggregation | ~335 μs | O(N) |
+| Conv (kernel=64) | ~148 μs | O(1) |
+| **Speedup** | **2.3x** | - |
+
+The 2.3x speedup is constant across context lengths (tested up to 8192 tokens).
+
+### 6.4 Effective Speedup
+
+Net inference speedup depends on routing fraction:
+
+| Routing | Attention % | Conv % | Effective Speedup |
+|---------|-------------|--------|-------------------|
+| Distance 126 (λ=0.5) | 0.3% | 99.7% | ~2.2x |
+| Distance 510 | 25% | 75% | ~1.45x |
+| Distance 1024 | 90% | 10% | ~1.06x |
+
+### 6.5 Memory
+
+Memory usage is **unchanged** from standard attention. The full KV cache must be retained because any future position might route to attention and require the complete history.
+
+The savings are purely computational: fewer positions perform the expensive O(N) aggregation.
+
+---
+
+## 8. Limitations
 
 **Long-range convergence**: At distances beyond 1024, phase 1 requires more than 25 epochs to learn the task. Architectural modifications (larger conv kernels, more capacity) may help.
 
@@ -216,7 +265,7 @@ The optimal λ depends on the accuracy-efficiency tradeoff requirements of the a
 
 ---
 
-## 7. Conclusion
+## 9. Conclusion
 
 Routed attention demonstrates that the choice between efficient O(N) models and accurate O(N²) attention is a false dichotomy. A learned router can dynamically select the appropriate computation per position, achieving 75-99% compute savings while matching full attention accuracy.
 
