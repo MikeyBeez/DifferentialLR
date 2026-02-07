@@ -1,10 +1,11 @@
 # Linear Attention Research
 
-This repository contains three research directions on efficient sequence modeling:
+This repository contains four research directions on efficient sequence modeling:
 
-1. **Attention Ablation** - What's actually necessary in attention? O(N) beats O(N²) (NEW)
-2. **Golden Ratio Engram** - Learnable EMA filter that complements attention
-3. **Phased Specialization** - Training strategy for hybrid Mamba-Transformer models
+1. **Attention Ablation** - What's actually necessary in attention? O(N) beats O(N²)
+2. **Routed Attention** - Learn when to use O(N) conv vs O(N²) attention per-position (NEW)
+3. **Golden Ratio Engram** - Learnable EMA filter that complements attention
+4. **Phased Specialization** - Training strategy for hybrid Mamba-Transformer models
 
 ---
 
@@ -64,7 +65,7 @@ O(N) wins at ALL sequence lengths tested.
 
 Conv fails beyond kernel size. It's a **local feature extractor**, not recurrent memory. Works for language modeling (high local correlation) but fails precise retrieval.
 
-9. **Routed attention** ([routed_attention_test.py](experiments/routed_attention_test.py)): **Solution found.** A router learns when to use conv (cheap O(N)) vs attention (expensive O(N²)). With curriculum learning (λ=0 first, then increase cost penalty):
+9. **Routed attention** ([routed_attention_test.py](experiments/routed_attention_test.py)): **Solution found.** A router learns when to use conv (cheap O(N)) vs attention (expensive O(N²)). With curriculum learning (λ=0 first, then increase cost penalty). **Paper: [papers/routed_attention.txt](papers/routed_attention.txt)**
 
 | Distance | Attention Only | Conv Only | Routed (λ=0.1) | Routed (λ=0.5) |
 |----------|----------------|-----------|----------------|----------------|
@@ -94,7 +95,7 @@ What this means:
 
 **✓ Solution (experiment 9):** Routed attention learns to use conv for most tokens, attention only when needed. With curriculum learning, achieves **99.7% compute savings** at distances 126-254, **75% savings** at distance 510, while maintaining accuracy. At longer distances (1024+), the model needs more training but still approaches attention-only performance.
 
-These results are at small scale (30M params, up to 2048 tokens). The perplexity advantage is real. Routed attention provides a path to efficient hybrid architectures. See the [paper](papers/attention_may_not_be_what_you_need.txt) for full discussion.
+These results are at small scale (30M params, up to 2048 tokens). The perplexity advantage is real. Routed attention provides a path to efficient hybrid architectures. See [Attention May Not Be What You Need](papers/attention_may_not_be_what_you_need.txt) for the ablation experiments and [Routed Attention](papers/routed_attention.txt) for the curriculum learning solution.
 
 ---
 
@@ -320,7 +321,8 @@ DifferentialLR/
 │   └── benchmark_tps.py            # Throughput measurement
 │
 ├── papers/
-│   ├── attention_may_not_be_what_you_need.txt  # Attention ablation paper (NEW)
+│   ├── attention_may_not_be_what_you_need.txt  # Attention ablation paper
+│   ├── routed_attention.txt        # Routed attention paper (NEW)
 │   ├── golden_engram_corrected.md  # Corrected Golden Ratio Engram paper
 │   └── golden_engram_corrected.txt # Plain text version
 ├── paper_end_of_attention.txt # Golden Crystallization paper (superseded)
