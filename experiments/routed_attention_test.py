@@ -370,8 +370,24 @@ def generate_recall_batch(batch_size, seq_len, vocab_size, device='cuda'):
 
 # --- Training ---
 
-def train_epoch(model, optimizer, config, seq_len, num_batches=100, batch_size=32, device='cuda'):
+def get_batch_size(seq_len):
+    """Adaptive batch size to avoid OOM on longer sequences."""
+    if seq_len <= 256:
+        return 32
+    elif seq_len <= 512:
+        return 24
+    elif seq_len <= 1024:
+        return 16
+    elif seq_len <= 2048:
+        return 8
+    else:
+        return 4
+
+
+def train_epoch(model, optimizer, config, seq_len, num_batches=100, batch_size=None, device='cuda'):
     """Train on pure retrieval task - the only fair test."""
+    if batch_size is None:
+        batch_size = get_batch_size(seq_len)
     model.train()
 
     total_loss = 0
@@ -412,8 +428,10 @@ def train_epoch(model, optimizer, config, seq_len, num_batches=100, batch_size=3
 
 
 @torch.no_grad()
-def evaluate_recall(model, config, seq_len, num_batches=50, batch_size=32, device='cuda'):
+def evaluate_recall(model, config, seq_len, num_batches=50, batch_size=None, device='cuda'):
     """Test pure retrieval accuracy."""
+    if batch_size is None:
+        batch_size = get_batch_size(seq_len)
     model.eval()
     total_correct = 0
     total_samples = 0
@@ -432,7 +450,7 @@ def evaluate_recall(model, config, seq_len, num_batches=50, batch_size=32, devic
     return total_correct / total_samples, total_attn_usage / num_batches
 
 
-def test_model(name, model_class, config, seq_lengths, device, epochs=20):
+def test_model(name, model_class, config, seq_lengths, device, epochs=30):
     print(f"\n{'='*60}", flush=True)
     print(f"{name}", flush=True)
     print(f"{'='*60}", flush=True)
@@ -474,7 +492,7 @@ def test_model(name, model_class, config, seq_lengths, device, epochs=20):
     return results
 
 
-def test_curriculum(name, model_class, config, seq_lengths, device, phase1_epochs=15, phase2_epochs=15):
+def test_curriculum(name, model_class, config, seq_lengths, device, phase1_epochs=25, phase2_epochs=20):
     """
     Curriculum learning for routed attention:
     Phase 1: λ=0, learn to solve task (router learns when attention is needed)
@@ -562,7 +580,7 @@ def main():
     print(f"Learning when to use expensive attention vs cheap conv", flush=True)
 
     config = Config()
-    seq_lengths = [64, 128, 256, 512]
+    seq_lengths = [128, 256, 512, 1024, 2048]
 
     all_results = {}
 
