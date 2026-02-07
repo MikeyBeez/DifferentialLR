@@ -79,6 +79,24 @@ Conv fails beyond kernel size. It's a **local feature extractor**, not recurrent
 
 At shorter distances (126-254), the router achieves **100% accuracy with near-zero attention** (99.7% compute savings). At distance 510, routed attention matches full attention while using only 25% attention (75% savings). Distances 1024+ require more training epochs to converge.
 
+10. **Hopfield attention β=2** ([routed_hopfield_test.py](experiments/routed_hopfield_test.py)): **Extended range with sharper attention.** Inspired by Modern Hopfield Networks (Ramsauer et al., 2020), we tested attention sharpening via inverse temperature β. Standard softmax attention uses β=1; Hopfield networks use β>1 for sharper pattern retrieval.
+
+| Distance | β=1 (standard) | β=2 (Hopfield) | β=4 |
+|----------|----------------|----------------|-----|
+| 126      | 100% (67% attn) | 100% (75% attn) | 100% (80% attn) |
+| 254      | 100% (61% attn) | 100% (69% attn) | 100% (76% attn) |
+| 510      | **94% (73% attn)** | **100% (60% attn)** | 1% (23% attn) |
+
+**Key finding:** β=2 solves distance 510 where β=1 fails. It's the Goldilocks zone—sharper than standard attention for better recall, but not so sharp that it collapses (β=4 fails at long range due to gradient instability). One-line fix:
+
+```python
+# Standard attention (β=1)
+attn = softmax(Q @ K.T / sqrt(d))
+
+# Hopfield attention (β=2) - extends effective range
+attn = softmax(2.0 * Q @ K.T / sqrt(d))
+```
+
 ### Conclusions
 
 - The dot product isn't special - any differentiable comparison works
