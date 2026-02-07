@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: "Routed Attention: Learning When to Think Hard"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: "Bonsignore"
+    given-names: "Mike"
+repository-code: "https://github.com/MikeyBeez/DifferentialLR"
+abstract: >-
+  Routed attention learns to dynamically select between O(N) causal
+  convolution and O(N²) softmax attention on a per-position basis.
+  A lightweight router network examines each position and routes it
+  to the appropriate computational pathway. Using curriculum learning
+  (first train with no attention penalty, then gradually increase it),
+  routed attention achieves 100% accuracy with only 0.3% attention
+  usage at distance 126 (99.7% compute savings), and 100% accuracy
+  with 25% attention usage at distance 510 (75% compute savings).
+keywords:
+  - attention mechanisms
+  - efficient transformers
+  - mixture of experts
+  - curriculum learning
+  - sequence modeling
+  - deep learning
+  - neural networks
+license: MIT
+date-released: "2026-02-07"
