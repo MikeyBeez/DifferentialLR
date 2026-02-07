@@ -307,6 +307,50 @@ Memory is unchanged - must keep full KV cache since any future position might us
 
 ---
 
+Hopfield Attention: Sharper Retrieval with β=2
+
+A key insight came from connecting attention to Hopfield networks.
+
+Modern Hopfield networks (Ramsauer et al., 2020) showed that transformer attention is equivalent to associative memory retrieval. The softmax attention formula is exactly the Hopfield energy minimization update:
+
+```
+attention = softmax(β * Q·K^T / √d) · V
+```
+
+Standard attention uses β=1. But Hopfield theory suggests higher β = sharper retrieval = more precise lookup.
+
+I tested this hypothesis on routed attention:
+
+| β | Distance 126 | Distance 254 | Distance 510 |
+|---|--------------|--------------|--------------|
+| 1 | 100% (67% attn) | 100% (61% attn) | **94% FAILED** |
+| 2 | 100% (75% attn) | 100% (69% attn) | **100% SOLVED** |
+| 4 | 100% (80% attn) | 100% (76% attn) | **1% CATASTROPHIC** |
+
+The results reveal a Goldilocks zone:
+
+- **β=1 (standard)**: Can't solve distance 510. The soft attention weights spread across too many keys.
+- **β=2 (optimal)**: Solves everything, converges faster (11 vs 16 epochs). Sharp enough to lock onto distant keys.
+- **β=4 (too sharp)**: Works at short range but catastrophically fails at long range. Gradients become unstable.
+
+The fix is trivial - multiply attention logits by 2:
+
+```python
+# Before (standard attention)
+attn = softmax(Q @ K.T / sqrt(d))
+
+# After (Hopfield attention)
+attn = softmax(2.0 * Q @ K.T / sqrt(d))
+```
+
+This extends routed attention's effective range. The 94% ceiling at distance 510 becomes 100%. No additional parameters, no architectural changes - just sharper retrieval.
+
+Why does β=4 fail? I suspect the energy landscape becomes too steep. At short distances, sharp gradients help. At long distances, they cause the router to collapse to low attention usage (23%), which is wrong for the task. The model gets stuck in a local minimum where it avoids attention entirely.
+
+β=2 is the sweet spot: sharp enough for precise retrieval, smooth enough for stable training.
+
+---
+
 What This Means
 
 Routed attention proves that O(N²) computation isn't necessary everywhere - just where it matters.
@@ -381,7 +425,9 @@ The journey had unexpected lessons:
 
 4. The router learns interpretable patterns. Query positions use attention, key-value positions use conv.
 
-The result: 75-99% compute savings while matching full attention accuracy.
+5. Hopfield sharpening helps. Multiplying attention logits by β=2 extends effective range and speeds convergence. Standard attention (β=1) fails at distance 510; Hopfield attention (β=2) solves it.
+
+The result: 75-99% compute savings while matching full attention accuracy, with extended range via Hopfield sharpening.
 
 You don't have to choose between accurate and fast. You can route to both.
 

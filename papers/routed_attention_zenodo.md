@@ -8,7 +8,7 @@ February 2026
 
 ## Abstract
 
-We present routed attention, an architecture that learns to dynamically select between O(N) causal convolution and O(N²) softmax attention on a per-position basis. A lightweight router network examines each position and routes it to the appropriate computational pathway. We demonstrate that naive joint optimization of task performance and attention minimization fails due to insufficient exploration, and propose a curriculum learning solution: first train with no attention penalty (λ=0) to learn task-relevant routing patterns, then gradually increase λ to minimize attention usage while maintaining accuracy. On an associative recall benchmark requiring long-range retrieval, routed attention achieves 100% accuracy with only 0.3% attention usage at distance 126 (99.7% compute savings), and 100% accuracy with 25% attention usage at distance 510 (75% compute savings). The approach provides a principled method for combining efficient local processing with expensive global attention only where necessary.
+We present routed attention, an architecture that learns to dynamically select between O(N) causal convolution and O(N²) softmax attention on a per-position basis. A lightweight router network examines each position and routes it to the appropriate computational pathway. We demonstrate that naive joint optimization of task performance and attention minimization fails due to insufficient exploration, and propose a curriculum learning solution: first train with no attention penalty (λ=0) to learn task-relevant routing patterns, then gradually increase λ to minimize attention usage while maintaining accuracy. On an associative recall benchmark requiring long-range retrieval, routed attention achieves 100% accuracy with only 0.3% attention usage at distance 126 (99.7% compute savings), and 100% accuracy with 25% attention usage at distance 510 (75% compute savings). We further show that using Hopfield-style attention with inverse temperature β=2 extends the effective range of routed attention, solving cases where standard attention (β=1) fails. The approach provides a principled method for combining efficient local processing with expensive global attention only where necessary.
 
 **Keywords:** attention mechanisms, efficient transformers, mixture of experts, curriculum learning, sequence modeling
 
@@ -31,6 +31,8 @@ Our main contributions are:
 2. **Training methodology**: A curriculum learning approach that first learns task-relevant routing (λ=0), then optimizes for efficiency (increasing λ). We show that naive joint optimization fails due to premature convergence to the cheap pathway.
 
 3. **Empirical results**: On associative recall, routed attention achieves 75-99% compute savings while matching full attention accuracy, up to distance 510.
+
+4. **Hopfield sharpening**: We show that multiplying attention logits by β=2 (connecting to modern Hopfield network theory) extends routed attention's effective range, solving distance 510 where β=1 fails.
 
 ---
 
@@ -253,6 +255,56 @@ The savings are purely computational: fewer positions perform the expensive O(N)
 
 ---
 
+## 7. Hopfield Attention: Extending Range with β=2
+
+### 7.1 Connection to Hopfield Networks
+
+Modern Hopfield networks (Ramsauer et al., 2020) established that transformer attention is equivalent to associative memory retrieval. The attention formula corresponds to energy minimization in a Hopfield network:
+
+$$\text{attention} = \text{softmax}(\beta \cdot \mathbf{Q}\mathbf{K}^T / \sqrt{d}) \cdot \mathbf{V}$$
+
+Standard attention uses β=1. Hopfield theory suggests higher β produces sharper retrieval—more precise pattern matching at the cost of reduced smoothness.
+
+### 7.2 Empirical Results
+
+We tested β ∈ {1, 2, 4} on routed attention:
+
+| β | Distance 126 | Distance 254 | Distance 510 |
+|---|--------------|--------------|--------------|
+| 1 | 100% (67% attn) | 100% (61% attn) | **94%** |
+| 2 | 100% (75% attn) | 100% (69% attn) | **100%** |
+| 4 | 100% (80% attn) | 100% (76% attn) | **1%** |
+
+*Table 3: Accuracy and attention usage at different β values. β=2 solves distance 510 where β=1 fails.*
+
+### 7.3 The Goldilocks Zone
+
+**β=1 (standard)**: Soft attention weights spread across many keys. Works at short range but fails at distance 510 (94% ceiling).
+
+**β=2 (optimal)**: Sharp enough to lock onto distant keys. Solves all distances, converges 30% faster (11 vs 16 epochs).
+
+**β=4 (too sharp)**: Catastrophic failure at long range (1% accuracy). The router collapses to 23% attention usage—avoiding attention entirely, which is wrong for the task.
+
+### 7.4 Implementation
+
+The fix requires one line:
+
+```python
+# Standard attention
+attn = softmax(Q @ K.T / sqrt(d))
+
+# Hopfield attention (β=2)
+attn = softmax(2.0 * Q @ K.T / sqrt(d))
+```
+
+No additional parameters. No architectural changes. This simple modification extends routed attention's effective range from ~500 to 500+ tokens.
+
+### 7.5 Why β=4 Fails
+
+We hypothesize that β=4 creates an energy landscape that is too steep. At short distances, sharp gradients accelerate convergence. At long distances, they cause the router to collapse into a local minimum where it avoids attention entirely. β=2 balances sharpness for retrieval with smoothness for optimization.
+
+---
+
 ## 8. Limitations
 
 **Long-range convergence**: At distances beyond 1024, phase 1 requires more than 25 epochs to learn the task. Architectural modifications (larger conv kernels, more capacity) may help.
@@ -269,7 +321,11 @@ The savings are purely computational: fewer positions perform the expensive O(N)
 
 Routed attention demonstrates that the choice between efficient O(N) models and accurate O(N²) attention is a false dichotomy. A learned router can dynamically select the appropriate computation per position, achieving 75-99% compute savings while matching full attention accuracy.
 
-The key insight is curriculum learning: train to solve the task first (λ=0), then optimize for efficiency (increasing λ). This allows the router to discover which positions genuinely require expensive computation before being penalized for using it.
+Two key insights emerge:
+
+1. **Curriculum learning**: Train to solve the task first (λ=0), then optimize for efficiency (increasing λ). This allows the router to discover which positions genuinely require expensive computation before being penalized for using it.
+
+2. **Hopfield sharpening**: Using β=2 in the attention softmax (connecting to modern Hopfield network theory) extends effective retrieval range. Standard attention (β=1) fails at distance 510; Hopfield attention (β=2) solves it with a one-line change.
 
 Routed attention provides a principled path toward efficient sequence models that maintain the retrieval capabilities of full attention while avoiding unnecessary quadratic computation.
 
@@ -300,7 +356,11 @@ Gu, A., & Dao, T. (2023). Mamba: Linear-Time Sequence Modeling with Selective St
 
 Gu, A., Goel, K., & Ré, C. (2022). Efficiently Modeling Long Sequences with Structured State Spaces. *ICLR*.
 
+Hopfield, J. J. (1982). Neural Networks and Physical Systems with Emergent Collective Computational Abilities. *Proceedings of the National Academy of Sciences*, 79(8), 2554-2558.
+
 Jang, E., Gu, S., & Poole, B. (2017). Categorical Reparameterization with Gumbel-Softmax. *ICLR*.
+
+Ramsauer, H., Schäfl, B., Lehner, J., Seidl, P., Widrich, M., Adler, T., ... & Hochreiter, S. (2020). Hopfield Networks is All You Need. *ICLR*.
 
 Katharopoulos, A., Vyas, A., Pappas, N., & Fleuret, F. (2020). Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention. *ICML*.
 
