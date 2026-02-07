@@ -15,12 +15,16 @@ abstract: >-
   routed attention achieves 100% accuracy with only 0.3% attention
   usage at distance 126 (99.7% compute savings), and 100% accuracy
   with 25% attention usage at distance 510 (75% compute savings).
+  We further show that Hopfield-style attention with β=2 extends
+  effective recall range, solving cases where standard attention fails.
 keywords:
   - attention mechanisms
   - efficient transformers
   - mixture of experts
   - curriculum learning
   - sequence modeling
+  - hopfield networks
+  - associative memory
   - deep learning
   - neural networks
 license: MIT
