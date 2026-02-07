@@ -1,5 +1,7 @@
 # Linear Attention Research
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18518956.svg)](https://doi.org/10.5281/zenodo.18518956)
+
 This repository contains four research directions on efficient sequence modeling:
 
 1. **Attention Ablation** - What's actually necessary in attention? O(N) beats O(N²)
