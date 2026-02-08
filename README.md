@@ -154,6 +154,19 @@ The model handles ~1.5-2x its training noise ceiling before breaking. Clean accu
 
 **Why noise curriculum works:** This is "Maturation by Environment"—the model develops a mental filter calibrated to the noise levels it experienced during training. The ReLU brain was already smart enough; it just needed a noisy childhood.
 
+15. **Dilated/atrous convolutions (negative result)** ([dilated_conv_recall_test.py](experiments/dilated_conv_recall_test.py)): **Exponential receptive field does not enable recall.** Tested WaveNet-style dilated convolutions with receptive field of 1023 tokens.
+
+| Model | Dist 30 | Dist 62 | Dist 126 | Dist 510 |
+|-------|---------|---------|----------|----------|
+| Standard Attention | 100% | 99% | 99% | 100% |
+| Plain Conv K=64 | 99% | 99% | 1% | 1% |
+| Dilated Conv (RF=1023) | **1%** | **2%** | **2%** | **2%** |
+| Multi-Scale Dilated | **1%** | **2%** | **2%** | **2%** |
+
+**Dilated convolutions fail at ALL distances—even distance 30—despite having receptive field covering the entire sequence.**
+
+**Why it fails:** Receptive field ≠ memory. Dilated convolutions sparsely sample positions (1, 2, 4, 8, 16...), destroying token identity through information compression. Plain conv works within its kernel because it densely samples all positions. Attention works because it has direct access to every position—no information-destroying hops. Dilated conv is designed for feature aggregation (WaveNet audio), not token retrieval.
+
 ### Conclusions
 
 - The dot product isn't special - any differentiable comparison works
