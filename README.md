@@ -129,7 +129,7 @@ attn = softmax(2.0 * Q @ K.T / sqrt(d))
 
 **Key findings:** (1) ReLU is most noise-robust but slowest to converge. (2) Activation curricula don't help—representations learned under one activation don't transfer well when switched. (3) Saturation creates "dead zones" that hurt robustness. **Tradeoff:** Speed (GELU) vs Robustness (ReLU). No free lunch.
 
-14. **Noise curriculum (positive result)** ([conviction_pump_test.py](experiments/conviction_pump_test.py)): **Training with gradually increasing noise dramatically improves robustness.** Tested three approaches inspired by Rectified JEPA's "conviction" concept:
+14. **Noise curriculum (positive result)** ([conviction_pump_test.py](experiments/conviction_pump_test.py), [noise_stress_test.py](experiments/noise_stress_test.py)): **Training with gradually increasing noise dramatically improves robustness.** Paper: [Maturation by Environment](papers/maturation_by_environment.md)
 
 | Strategy | Noise 0.5 | Noise 1.0 | Notes |
 |----------|-----------|-----------|-------|
@@ -140,9 +140,19 @@ attn = softmax(2.0 * Q @ K.T / sqrt(d))
 
 **The simple solution won:** Training with noise curriculum (starting at 0, ramping to 0.5 over epochs) improved noise robustness by **+25.4 percentage points** at Noise 1.0. Complex mechanisms (conviction loss penalizing "hedging", weight pulsing) were counterproductive.
 
+Stress testing ([noise_stress_test.py](experiments/noise_stress_test.py)) revealed the breaking point:
+
+| Training Noise | Breaks At | Clean Accuracy |
+|----------------|-----------|----------------|
+| 0 → 0.5 | Noise 2.0 | 100% |
+| 0 → 1.0 | Noise 2.0 | 100% |
+| 0 → 1.5 | Noise 2.5 | 100% |
+
+The model handles ~1.5-2x its training noise ceiling before breaking. Clean accuracy is never sacrificed—robustness is essentially free.
+
 **Why conviction loss fails:** It penalizes neurons in the 0 < x < threshold "hedging zone", trying to force binary decisions. But early in training, hedging is necessary for exploration. Forcing conviction too early prevents learning.
 
-**Why noise curriculum works:** The model learns to be robust because it trained on noisy data. No architectural changes needed—just augment the training data.
+**Why noise curriculum works:** This is "Maturation by Environment"—the model develops a mental filter calibrated to the noise levels it experienced during training. The ReLU brain was already smart enough; it just needed a noisy childhood.
 
 ### Conclusions
 
@@ -389,7 +399,8 @@ DifferentialLR/
 │
 ├── papers/
 │   ├── attention_may_not_be_what_you_need.txt  # Attention ablation paper
-│   ├── routed_attention.txt        # Routed attention paper (NEW)
+│   ├── routed_attention.txt        # Routed attention paper
+│   ├── maturation_by_environment.md # Noise curriculum paper (NEW)
 │   ├── golden_engram_corrected.md  # Corrected Golden Ratio Engram paper
 │   └── golden_engram_corrected.txt # Plain text version
 ├── paper_end_of_attention.txt # Golden Crystallization paper (superseded)
