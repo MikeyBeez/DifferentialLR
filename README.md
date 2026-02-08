@@ -118,6 +118,17 @@ attn = softmax(2.0 * Q @ K.T / sqrt(d))
 
 **Why it fails:** Recall is a *retrieval problem* (find the right position to attend), not a *representation problem* (extract clean features). Sparsifying FFN activations damages information flow without helping attention find where to look. Positive finding: β=2 solves 2x faster than β=1.
 
+13. **Activation maturation (negative result)** ([softsign_maturation_test.py](experiments/softsign_maturation_test.py)): Tested whether transitioning activations during training (ReLU→GELU→Tanh) improves noise robustness. It doesn't—GELU wins decisively.
+
+| Activation | Noise 0.5 | Noise 1.0 |
+|------------|-----------|-----------|
+| **GELU** | **97.3%** | **71.7%** |
+| Softsign | 93.5% | 54.0% |
+| Tanh | 95.4% | 64.9% |
+| Learnable blend | 94.0% | 65.3% |
+
+**Why it fails:** GELU's unbounded positive tail preserves dynamic range needed to distinguish signal from noise. Saturation (Tanh, Softsign) creates "dead zones" where high signal and high noise look the same. The learnable α parameter stayed at 0.005—the model "wants" pure GELU.
+
 ### Conclusions
 
 - The dot product isn't special - any differentiable comparison works
