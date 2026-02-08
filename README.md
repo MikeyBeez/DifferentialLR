@@ -118,16 +118,16 @@ attn = softmax(2.0 * Q @ K.T / sqrt(d))
 
 **Why it fails:** Recall is a *retrieval problem* (find the right position to attend), not a *representation problem* (extract clean features). Sparsifying FFN activations damages information flow without helping attention find where to look. Positive finding: β=2 solves 2x faster than β=1.
 
-13. **Activation maturation (negative result)** ([softsign_maturation_test.py](experiments/softsign_maturation_test.py)): Tested whether transitioning activations during training (ReLU→GELU→Tanh) improves noise robustness. It doesn't—GELU wins decisively.
+13. **Activation maturation (negative result)** ([softsign_maturation_test.py](experiments/softsign_maturation_test.py), [inverted_maturation_test.py](experiments/inverted_maturation_test.py)): Tested whether transitioning activations during training improves noise robustness. No curriculum beats fixed activations.
 
-| Activation | Noise 0.5 | Noise 1.0 |
-|------------|-----------|-----------|
-| **GELU** | **97.3%** | **71.7%** |
-| Softsign | 93.5% | 54.0% |
-| Tanh | 95.4% | 64.9% |
-| Learnable blend | 94.0% | 65.3% |
+| Strategy | Noise 0.5 | Noise 1.0 | Convergence |
+|----------|-----------|-----------|-------------|
+| Hardening (GELU→Tanh) | 95.4% | 64.9% | Fast |
+| Inverted (Tanh→GELU→ReLU) | 94.7% | 52.5% | Fast |
+| **GELU (fixed)** | 93-97% | 60-72% | **Fast** |
+| **ReLU (fixed)** | **98.3%** | **68.3%** | Slow |
 
-**Why it fails:** GELU's unbounded positive tail preserves dynamic range needed to distinguish signal from noise. Saturation (Tanh, Softsign) creates "dead zones" where high signal and high noise look the same. The learnable α parameter stayed at 0.005—the model "wants" pure GELU.
+**Key findings:** (1) ReLU is most noise-robust but slowest to converge. (2) Activation curricula don't help—representations learned under one activation don't transfer well when switched. (3) Saturation creates "dead zones" that hurt robustness. **Tradeoff:** Speed (GELU) vs Robustness (ReLU). No free lunch.
 
 ### Conclusions
 
