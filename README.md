@@ -129,6 +129,21 @@ attn = softmax(2.0 * Q @ K.T / sqrt(d))
 
 **Key findings:** (1) ReLU is most noise-robust but slowest to converge. (2) Activation curricula don't help—representations learned under one activation don't transfer well when switched. (3) Saturation creates "dead zones" that hurt robustness. **Tradeoff:** Speed (GELU) vs Robustness (ReLU). No free lunch.
 
+14. **Noise curriculum (positive result)** ([conviction_pump_test.py](experiments/conviction_pump_test.py)): **Training with gradually increasing noise dramatically improves robustness.** Tested three approaches inspired by Rectified JEPA's "conviction" concept:
+
+| Strategy | Noise 0.5 | Noise 1.0 | Notes |
+|----------|-----------|-----------|-------|
+| ReLU baseline | 98.4% | 68.3% | Fixed noise-free training |
+| Conviction Loss | 4.9% | 1.5% | Broke the model |
+| **Noise Curriculum** | **99.5%** | **93.8%** | **+25.4pp at high noise** |
+| Full Pump (all combined) | 52.5% | 12.6% | Broke the model |
+
+**The simple solution won:** Training with noise curriculum (starting at 0, ramping to 0.5 over epochs) improved noise robustness by **+25.4 percentage points** at Noise 1.0. Complex mechanisms (conviction loss penalizing "hedging", weight pulsing) were counterproductive.
+
+**Why conviction loss fails:** It penalizes neurons in the 0 < x < threshold "hedging zone", trying to force binary decisions. But early in training, hedging is necessary for exploration. Forcing conviction too early prevents learning.
+
+**Why noise curriculum works:** The model learns to be robust because it trained on noisy data. No architectural changes needed—just augment the training data.
+
 ### Conclusions
 
 - The dot product isn't special - any differentiable comparison works
