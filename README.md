@@ -107,6 +107,17 @@ attn = softmax(2.0 * Q @ K.T / sqrt(d))
 
 **Key finding:** β=2 improves F1 by +5.4% on SQuAD when the model can adapt during fine-tuning. Note: inference-time patching of pretrained models does NOT help—the model must train with β=2 to benefit. β=1.5 is worse than baseline, confirming β=2.0 is a sweet spot.
 
+12. **Rectified bottleneck (negative result)** ([hopfield_rectified_test.py](experiments/hopfield_rectified_test.py)): Tested whether learned sparsity (Rectified JEPA-style) improves recall. It doesn't—it makes it worse.
+
+| Config | Dist 126 | Dist 254 | Dist 510 |
+|--------|----------|----------|----------|
+| β=1 (baseline) | 100% | 100% | 100% |
+| β=2 (Hopfield) | 100% | 100% | 100% (2x faster) |
+| β=2 + Rectified | 100% | 96% | **1%** |
+| β=1 + Rectified | 100% | 1% | **2%** |
+
+**Why it fails:** Recall is a *retrieval problem* (find the right position to attend), not a *representation problem* (extract clean features). Sparsifying FFN activations damages information flow without helping attention find where to look. Positive finding: β=2 solves 2x faster than β=1.
+
 ### Conclusions
 
 - The dot product isn't special - any differentiable comparison works
